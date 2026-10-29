@@ -305,6 +305,42 @@ docker run -it --rm -p 18888:18888 \
 需要 bwrap 沙箱时 compose 已声明 `SYS_ADMIN` 与 `seccomp:unconfined`；不需要
 沙箱可删掉这两项，`SandboxFactory` 会自动降级为路径白名单校验。
 
+### 网络受限时的构建
+
+`gradle-wrapper` 要从 `services.gradle.org` 下载发行版，而该域名会重定向到
+GitHub Releases，部分网络下不可达。把本机已下载好的发行版放进构建上下文即可，
+wrapper 命中 `*.ok` 标记后完全不再联网：
+
+```bash
+cp -r ~/.gradle/wrapper/dists/gradle-8.13-bin docker/gradle-dists/
+docker build -t mewagent .
+```
+
+`docker/gradle-dists/` 的内容已在 `.gitignore` 中，只有 `.gitkeep` 入库；目录为空
+时会退化成在线下载。Gradle 依赖仍需从 Maven Central 拉取，首次构建约 5 分钟。
+
+需要代理时注意两点：
+
+```bash
+docker build -t mewagent \
+  --build-arg http_proxy=http://host.docker.internal:7897 \
+  --build-arg https_proxy=http://host.docker.internal:7897 \
+  --build-arg GRADLE_PROXY_HOST=host.docker.internal \
+  --build-arg GRADLE_PROXY_PORT=7897 .
+```
+
+- `http_proxy` / `https_proxy` 是 Docker 的预定义 build-arg，会被 apt 与 curl 使用；
+  宿主机代理只监听 `127.0.0.1` 时，容器内该地址指向自己，apt 会直接
+  `Connection refused`。这种情况显式清空即可：
+  `--build-arg http_proxy= --build-arg https_proxy=`
+- Gradle **不读** `HTTPS_PROXY` 环境变量，只认 `-Dhttps.proxyHost`；而且
+  `gradle-wrapper.jar` 在 Gradle 启动前就要下载发行版，那时还读不到
+  `gradle.properties`，所以必须用 `GRADLE_PROXY_HOST` 注入 JVM 参数。
+
+`gh` CLI 在 GitHub 不可达时安装会自动跳过并打印警告，镜像仍可正常使用——
+缺少 `gh` 时 `CreatePullRequest` 降级为 `git push` + compare 链接。可显式关闭：
+`--build-arg INSTALL_GH=false`。
+
 ## 配置参考
 
 MewAgent 读取项目根目录下的 `.mewagent/config.yaml`。

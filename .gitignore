@@ -21,3 +21,7 @@ shengyuban/
 # 临时产物
 eval*.txt
 AH_column.txt
+
+# 离线 Gradle 发行版：体积大不入库，只保留占位文件
+docker/gradle-dists/*
+!docker/gradle-dists/.gitkeep
