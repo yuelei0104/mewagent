@@ -1,0 +1,22 @@
+# 构建上下文排除项：镜像里只需要源码和构建脚本
+.git
+.gradle
+build
+bin
+src.bak
+shengyuban
+.workbuddy
+
+# 配置含 API Key，运行时用 volume 挂载，绝不进镜像
+.mewagent
+.mewcode
+
+# JVM 崩溃日志与临时产物
+hs_err_pid*.log
+replay_pid*.log
+*.log
+*.tmp
+
+# 数据文件与占位文件
+AH_column.txt
+eval*.txt

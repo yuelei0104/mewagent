@@ -1,0 +1,54 @@
+# MewAgent 容器编排
+#
+# 用法：
+#   docker compose up -d --build
+#   curl -X POST localhost:18888/task \
+#        -H 'Authorization: Bearer <MEWAGENT_TASK_TOKEN>' \
+#        -H 'Content-Type: application/json' \
+#        -d '{"prompt":"修复 README 里的过期链接","wait":true}'
+#
+# 首次启动后配置目录是空的，需要导入一次：
+#   docker compose cp .mewagent/config.yaml mewagent:/home/agent/.mewagent/config.yaml
+#   docker compose restart
+
+services:
+  mewagent:
+    build:
+      context: .
+      args:
+        # 离线构建或不需要自动开 PR 时改为 "false"
+        INSTALL_GH: "true"
+    image: mewagent:latest
+    container_name: mewagent
+
+    ports:
+      - "18888:18888"
+
+    volumes:
+      # 待修改的代码库。WORKSPACE 可指向任意仓库根目录
+      - ${WORKSPACE:-.}:/workspace
+      # 配置与历史会话。命名卷保证容器重建后 API Key 和 sessions 不丢
+      - mewagent-config:/home/agent/.mewagent
+
+    environment:
+      # REST /task 接口的访问令牌。留空则该接口不需要鉴权，仅限本地使用
+      MEWAGENT_TASK_TOKEN: ${MEWAGENT_TASK_TOKEN:-}
+      # 用于 gh pr create；未配置时 CreatePullRequest 降级为 compare 链接
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-MewAgent}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-mewagent@localhost}
+
+    working_dir: /workspace
+
+    # ── bubblewrap 沙箱所需 ──────────────────────────────────────────
+    # bwrap 要创建 user namespace。不需要沙箱时删掉这两行，
+    # 让 SandboxFactory 自然降级为路径白名单校验。
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+
+    restart: unless-stopped
+
+volumes:
+  mewagent-config:

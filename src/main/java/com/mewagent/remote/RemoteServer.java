@@ -37,8 +37,11 @@ import com.mewagent.tui.dialog.AskUserDialog;
 import com.mewagent.worktree.WorktreeManager;
 
 import io.javalin.Javalin;
+import io.javalin.http.Context;
 import io.javalin.websocket.WsContext;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -101,6 +104,30 @@ public class RemoteServer {
     private volatile String mcpInstructions = "";
     private final boolean enableCoordinatorMode;
 
+    // ── REST 任务接口 ─────────────────────────────────────────────────
+    /**
+     * 串行保护：Agent 实例和 ConversationManager 都是单例，WebSocket 会话与
+     * REST 任务不能同时驱动它们。所有进入 agent.run() 的路径都必须持有此锁。
+     */
+    private final Object agentLock = new Object();
+
+    /** 最近任务记录。超过 MAX_TASK_HISTORY 时淘汰最旧的已完成任务。 */
+    private final Map<String, RemoteTask> tasks = new ConcurrentHashMap<>();
+    private static final int MAX_TASK_HISTORY = 100;
+
+    /**
+     * 单线程执行器：任务按提交顺序串行跑。用虚拟线程承载，排队期间
+     * 不占用平台线程。
+     */
+    private final ExecutorService taskExecutor = Executors.newSingleThreadExecutor(
+            r -> Thread.ofVirtual().name("remote-task-worker").unstarted(r));
+
+    /**
+     * 可选鉴权令牌。设置 MEWAGENT_TASK_TOKEN 后，REST 接口要求
+     * Authorization: Bearer &lt;token&gt;；未设置时保持开放（本地开发场景）。
+     */
+    private final String taskToken = System.getenv().getOrDefault("MEWAGENT_TASK_TOKEN", "");
+
     public RemoteServer(List<ProviderConfig> providers, List<McpServerConfig> mcpConfigs,
                         List<HookConfig> hookConfigs, String addr, boolean enableCoordinatorMode) {
         this.providers = providers;
@@ -128,6 +155,10 @@ public class RemoteServer {
                     ctx.contentType("text/html; charset=utf-8");
                     ctx.result(WebContent.INDEX_HTML);
                 })
+                // ── REST 任务接口（供 CI / 告警系统调用）──────────────────
+                .post("/task", this::handleCreateTask)
+                .get("/task/{id}", this::handleGetTask)
+                .get("/tasks", this::handleListTasks)
                 .ws("/ws", ws -> {
                     ws.onConnect(ctx -> {
                         connections.add(ctx);
@@ -383,19 +414,7 @@ public class RemoteServer {
                     // 应用层保活：回复 pong
                     broadcast(Map.of("type", "pong"));
                 }
-                case "list_sessions" -> {
-                    String workDir = System.getProperty("user.dir");
-                    var sessions = SessionManager.listSessions(workDir);
-                    broadcast(Map.of("type", "sessions", "data",
-                            sessions.stream().map(s -> Map.of(
-                                    "id", s.id(),
-                                    "firstMessage", s.firstMessage().length() > 80 ? s.firstMessage().substring(0, 80) + "..." : s.firstMessage(),
-                                    "messageCount", s.messageCount(),
-                                    "modTime", s.modTime().toString(),
-                                    "relativeTime", SessionManager.formatRelativeTime(s.modTime()),
-                                    "fileSize", SessionManager.formatFileSize(s.fileSize())
-                            )).toList()));
-                }
+                case "list_sessions" -> broadcastSessions(System.getProperty("user.dir"));
                 case "resume_session" -> {
                     if (data instanceof Map<?, ?> d) {
                         String targetId = (String) d.get("id");
@@ -416,16 +435,7 @@ public class RemoteServer {
                     broadcast(Map.of("type", "connected", "data",
                             Map.of("session", sessionId, "cwd", wd)));
                     // 刷新会话列表
-                    var sessions = SessionManager.listSessions(wd);
-                    broadcast(Map.of("type", "sessions", "data",
-                            sessions.stream().map(s -> Map.of(
-                                    "id", s.id(),
-                                    "firstMessage", s.firstMessage().length() > 80 ? s.firstMessage().substring(0, 80) + "..." : s.firstMessage(),
-                                    "messageCount", s.messageCount(),
-                                    "modTime", s.modTime().toString(),
-                                    "relativeTime", SessionManager.formatRelativeTime(s.modTime()),
-                                    "fileSize", SessionManager.formatFileSize(s.fileSize())
-                            )).toList()));
+                    broadcastSessions(wd);
                 }
                 case "get_session_history" -> {
                     if (data instanceof Map<?, ?> d) {
@@ -440,10 +450,47 @@ public class RemoteServer {
                                 Map.of("id", targetId, "messages", history)));
                     }
                 }
+                case "delete_session" -> {
+                    if (data instanceof Map<?, ?> d) {
+                        String targetId = (String) d.get("id");
+                        String wd = System.getProperty("user.dir");
+                        if (SessionManager.deleteSession(wd, targetId)) {
+                            // 删掉的正是当前会话：立刻切到新会话，避免后续消息写进已删文件
+                            if (targetId != null && targetId.equals(sessionId)) {
+                                sessionId = SessionManager.newId();
+                                if (agent != null) agent.setSessionId(sessionId);
+                                conversation = new ConversationManager();
+                                fileHistory = new FileHistory(wd, sessionId);
+                                broadcast(Map.of("type", "clear"));
+                                broadcast(Map.of("type", "connected", "data",
+                                        Map.of("session", sessionId, "cwd", wd)));
+                            }
+                            broadcast(Map.of("type", "session_deleted", "data", Map.of("id", targetId)));
+                        } else {
+                            broadcast(Map.of("type", "system", "data",
+                                    Map.of("message", "删除失败，会话不存在: " + targetId)));
+                        }
+                        broadcastSessions(wd);
+                    }
+                }
             }
         } catch (Exception e) {
             System.err.println("WebSocket message parse error: " + e.getMessage());
         }
+    }
+
+    /** 广播会话列表快照（list/new/delete 三处复用）。 */
+    private void broadcastSessions(String workDir) {
+        var sessions = SessionManager.listSessions(workDir);
+        broadcast(Map.of("type", "sessions", "data",
+                sessions.stream().map(s -> Map.of(
+                        "id", s.id(),
+                        "firstMessage", s.firstMessage().length() > 80 ? s.firstMessage().substring(0, 80) + "..." : s.firstMessage(),
+                        "messageCount", s.messageCount(),
+                        "modTime", s.modTime().toString(),
+                        "relativeTime", SessionManager.formatRelativeTime(s.modTime()),
+                        "fileSize", SessionManager.formatFileSize(s.fileSize())
+                )).toList()));
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -462,29 +509,241 @@ public class RemoteServer {
             return;
         }
 
-        streaming = true;
-        streamThread = Thread.currentThread();
-        String workDir = System.getProperty("user.dir");
-        SessionManager.saveMessage(workDir, sessionId, "user", content);
-        conversation.addUserMessage(content);
+        // Agent 与 Conversation 都是单例，必须与 REST 任务串行
+        synchronized (agentLock) {
+            if (streaming) return;
 
-        // 首次消息时注入 MCP 指令
-        if (!mcpInstructions.isEmpty()) {
-            conversation.addSystemReminder(mcpInstructions);
-            mcpInstructions = "";
+            streaming = true;
+            streamThread = Thread.currentThread();
+            String workDir = System.getProperty("user.dir");
+            SessionManager.saveMessage(workDir, sessionId, "user", content);
+            conversation.addUserMessage(content);
+
+            // 首次消息时注入 MCP 指令
+            if (!mcpInstructions.isEmpty()) {
+                conversation.addSystemReminder(mcpInstructions);
+                mcpInstructions = "";
+            }
+
+            // 启动 Agent 并消费事件
+            agentQueue = agent.run(conversation);
+            if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
+
+            try {
+                consumeAgentEvents();
+            } finally {
+                streaming = false;
+                streamThread = null;
+                agentQueue = null;
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // REST 任务接口
+    // ────────────────────────────────────────────────────────────────────
+
+    /** 单次事件等待上限：Agent 若长时间无任何事件，判定任务卡死。 */
+    private static final long TASK_IDLE_TIMEOUT_SEC = 600;
+
+    /** wait=true 时同步等待的上限，超过后返回 202 交给调用方轮询。 */
+    private static final long TASK_WAIT_TIMEOUT_MS = 300_000;
+
+    /**
+     * POST /task
+     * body: {"prompt": "...", "wait": false}
+     *
+     * 立即返回 202 + taskId，任务在单线程队列里串行执行；wait=true 时最多
+     * 同步等待 5 分钟，拿到结果直接返回 200。
+     */
+    private void handleCreateTask(Context ctx) {
+        if (!authorized(ctx)) {
+            ctx.status(401).json(Map.of("error", "unauthorized"));
+            return;
         }
 
-        // 启动 Agent 并消费事件
-        agentQueue = agent.run(conversation);
-        if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
-
+        String prompt;
+        boolean waitForResult;
         try {
-            consumeAgentEvents();
-        } finally {
-            streaming = false;
-            streamThread = null;
-            agentQueue = null;
+            String raw = ctx.body();
+            var body = MAPPER.readTree(raw == null || raw.isBlank() ? "{}" : raw);
+            prompt = body.path("prompt").asText("");
+            waitForResult = body.path("wait").asBoolean(false);
+        } catch (Exception e) {
+            ctx.status(400).json(Map.of("error", "invalid JSON body: " + e.getMessage()));
+            return;
         }
+
+        if (prompt == null || prompt.isBlank()) {
+            ctx.status(400).json(Map.of("error", "prompt is required"));
+            return;
+        }
+
+        evictOldTasks();
+
+        String id = "task_" + System.nanoTime();
+        var task = new RemoteTask(id, prompt.strip());
+        tasks.put(id, task);
+        taskExecutor.submit(() -> runTask(task));
+
+        if (!waitForResult) {
+            ctx.status(202).json(Map.of("taskId", id, "status", task.status,
+                    "poll", "/task/" + id));
+            return;
+        }
+
+        long deadline = System.currentTimeMillis() + TASK_WAIT_TIMEOUT_MS;
+        while (!task.isFinished() && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        ctx.status(task.isFinished() ? 200 : 202).json(task.toJson());
+    }
+
+    /** GET /task/{id} */
+    private void handleGetTask(Context ctx) {
+        if (!authorized(ctx)) {
+            ctx.status(401).json(Map.of("error", "unauthorized"));
+            return;
+        }
+        var task = tasks.get(ctx.pathParam("id"));
+        if (task == null) {
+            ctx.status(404).json(Map.of("error", "task not found"));
+            return;
+        }
+        ctx.json(task.toJson());
+    }
+
+    /** GET /tasks —— 最近 50 条任务，按创建时间倒序。 */
+    private void handleListTasks(Context ctx) {
+        if (!authorized(ctx)) {
+            ctx.status(401).json(Map.of("error", "unauthorized"));
+            return;
+        }
+        var list = tasks.values().stream()
+                .sorted(java.util.Comparator.comparingLong((RemoteTask t) -> t.createdAt).reversed())
+                .limit(50)
+                .map(RemoteTask::toJson)
+                .toList();
+        ctx.json(Map.of("count", list.size(), "tasks", list));
+    }
+
+    /**
+     * 执行一次无人值守任务：把 prompt 输入 Agent，收集流式文本直到循环结束。
+     *
+     * 权限处理：REST 调用没有界面可弹窗，权限请求一律按 ALLOW 放行（单次，
+     * 不写入 allow-always 规则）。因此该接口只应在受信任环境中暴露——生产
+     * 部署请设置 MEWAGENT_TASK_TOKEN，并配合沙箱或容器隔离。
+     */
+    private void runTask(RemoteTask task) {
+        synchronized (agentLock) {
+            if (streaming) {
+                task.status = RemoteTask.FAILED;
+                task.error = "agent is busy with another session; retry later";
+                task.finishedAt = System.currentTimeMillis();
+                return;
+            }
+
+            streaming = true;
+            task.status = RemoteTask.RUNNING;
+            task.startedAt = System.currentTimeMillis();
+            var text = new StringBuilder();
+
+            try {
+                String workDir = System.getProperty("user.dir");
+                SessionManager.saveMessage(workDir, sessionId, "user", task.prompt);
+                conversation.addUserMessage(task.prompt);
+
+                if (!mcpInstructions.isEmpty()) {
+                    conversation.addSystemReminder(mcpInstructions);
+                    mcpInstructions = "";
+                }
+
+                agentQueue = agent.run(conversation);
+                if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
+
+                outer:
+                while (true) {
+                    AgentEvent event = agentQueue.poll(TASK_IDLE_TIMEOUT_SEC, TimeUnit.SECONDS);
+                    if (event == null) {
+                        task.error = "timed out waiting for agent events";
+                        break;
+                    }
+                    switch (event) {
+                        case AgentEvent.StreamText e -> text.append(e.text());
+                        case AgentEvent.UsageEvent e -> {
+                            task.inputTokens = e.inputTokens();
+                            task.outputTokens = e.outputTokens();
+                        }
+                        case AgentEvent.TurnComplete e -> task.turns = e.turn();
+                        case AgentEvent.ErrorEvent e -> task.error = e.message();
+                        case AgentEvent.LoopComplete e -> {
+                            if (e.totalTurns() > 0) task.turns = e.totalTurns();
+                            task.result = text.toString().strip();
+                            break outer;
+                        }
+                        case AgentEvent.PermissionRequestEvent e ->
+                                e.future().complete(PermissionResponse.ALLOW);
+                        case AgentEvent.AskUserRequestEvent e ->
+                                e.future().complete(Map.of());
+                        default -> {
+                            // ThinkingText / ToolUse / ToolResult / Compact / Retry
+                            // 对 REST 调用方没有价值，忽略
+                        }
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                task.error = "interrupted";
+            } catch (Exception e) {
+                task.error = "task error: " + e.getMessage();
+            } finally {
+                if (task.error == null) {
+                    task.status = RemoteTask.COMPLETED;
+                    if (task.result != null && !task.result.isEmpty()) {
+                        try {
+                            SessionManager.saveMessage(System.getProperty("user.dir"),
+                                    sessionId, "assistant", task.result);
+                        } catch (Exception ignored) {
+                            // 落盘失败不应让已成功的任务变成失败
+                        }
+                    }
+                } else {
+                    task.status = RemoteTask.FAILED;
+                }
+                task.finishedAt = System.currentTimeMillis();
+                streaming = false;
+                streamThread = null;
+                agentQueue = null;
+            }
+        }
+    }
+
+    /** 校验 Bearer token；未配置 MEWAGENT_TASK_TOKEN 时放行。 */
+    private boolean authorized(Context ctx) {
+        if (taskToken.isBlank()) return true;
+        String header = ctx.header("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) return false;
+        byte[] provided = header.substring("Bearer ".length()).getBytes(StandardCharsets.UTF_8);
+        byte[] expected = taskToken.getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(provided, expected);
+    }
+
+    /** 任务表满额时淘汰最旧的已完成任务，保留运行中的记录。 */
+    private void evictOldTasks() {
+        if (tasks.size() < MAX_TASK_HISTORY) return;
+        int toRemove = tasks.size() - MAX_TASK_HISTORY + 1;
+        tasks.values().stream()
+                .filter(RemoteTask::isFinished)
+                .sorted(java.util.Comparator.comparingLong((RemoteTask t) -> t.createdAt))
+                .limit(toRemove)
+                .map(t -> t.id)
+                .toList()
+                .forEach(tasks::remove);
     }
 
     // ────────────────────────────────────────────────────────────────────

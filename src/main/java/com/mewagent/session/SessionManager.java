@@ -283,6 +283,33 @@ public class SessionManager {
      * 根据文件的最后修改时间判断是否过期。
      * 失败时静默忽略——清理是尽力而为，不应影响正常流程。
      */
+    /**
+     * 删除指定会话的 JSONL 文件。
+     *
+     * <p>会话 id 会被严格校验，只允许字母、数字、点、下划线和短横线，
+     * 并显式拒绝 {@code ..}，避免通过 id 构造路径穿越删除任意文件。
+     *
+     * @return 文件存在且删除成功返回 {@code true}；文件不存在、id 非法或删除失败返回 {@code false}
+     */
+    public static boolean deleteSession(String workDir, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+        if (!sessionId.matches("[A-Za-z0-9._-]+") || sessionId.contains("..")) {
+            return false;
+        }
+        Path file = sessionsDir(workDir).resolve(sessionId + ".jsonl");
+        // 二次确认解析后的路径仍在 sessions 目录内
+        if (!file.normalize().startsWith(sessionsDir(workDir).normalize())) {
+            return false;
+        }
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     public static void cleanExpiredSessions(String workDir) {
         Path baseDir = sessionsDir(workDir);
         if (!Files.isDirectory(baseDir)) {

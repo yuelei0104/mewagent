@@ -113,6 +113,7 @@ public class PromptBuilder {
         builder.add(PromptSections.systemSection());
         builder.add(PromptSections.doingTasksSection());
         builder.add(PromptSections.executingActionsSection());
+        builder.add(PromptSections.verificationSection());
         builder.add(PromptSections.usingToolsSection());
         builder.add(PromptSections.toneStyleSection());
         builder.add(PromptSections.outputEfficiencySection());

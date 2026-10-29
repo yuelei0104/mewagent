@@ -196,6 +196,44 @@ java -jar build/libs/mewagent.jar --remote=:18888
  .\gradlew.bat run --args='--remote'
 ```
 
+## REST 任务接口
+
+远程模式额外提供三个 HTTP 接口，供 CI / 告警系统调用，不需要 WebSocket 客户端。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/task` | 提交任务，body `{"prompt": "...", "wait": false}` |
+| `GET` | `/task/{id}` | 查询单个任务的状态与结果 |
+| `GET` | `/tasks` | 最近 50 条任务（按创建时间倒序） |
+
+```bash
+curl -X POST http://127.0.0.1:18888/task \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "修复 src/ 下失败的测试", "wait": true}'
+```
+
+```json
+{
+  "taskId": "task_1052813191854200",
+  "status": "completed",
+  "result": "已修复 …",
+  "inputTokens": 5567,
+  "outputTokens": 3,
+  "turns": 1,
+  "durationMs": 912
+}
+```
+
+任务在单线程队列中串行执行——Agent 实例与对话管理器是单例，不能并发驱动。
+`wait=true` 最多同步等待 5 分钟，超时返回 `202`，改用 `GET /task/{id}` 轮询。
+
+**鉴权**：设置 `MEWAGENT_TASK_TOKEN` 后，三个接口都要求
+`Authorization: Bearer <token>`（常量时间比较）。未设置时不鉴权，仅限本地使用。
+
+**权限**：REST 任务无人值守，没有界面可弹窗，工具权限请求一律自动放行
+（单次批准，不写入 allow-always 规则）。请配合沙箱或容器隔离使用，
+不要把该接口暴露到不受信任的网络。
+
 ## 验证
 
 ```bash
@@ -239,17 +277,33 @@ java -jar build/libs/mewagent.jar --remote=:18888
   不要将后端直接暴露到公网。
 - 从不可信来源加载的技能可能执行任意命令。安装前请审查 `SKILL.md` 文件。
 
-## Docker（实验性）
+## Docker
 
-提供 Dockerfile 用于容器化部署：
+镜像基于 Linux，因此 OS 级沙箱（bubblewrap）可完整启用——Windows 宿主上
+`SandboxFactory` 返回 `null` 的降级路径在容器内不会触发。
+
+```bash
+docker compose up -d --build
+
+# 首次启动后导入配置（命名卷初始为空）
+docker compose cp .mewagent/config.yaml mewagent:/home/agent/.mewagent/config.yaml
+docker compose restart
+```
+
+或直接用 docker run：
 
 ```bash
 docker build -t mewagent .
-docker run -it --rm \
+
+docker run -it --rm -p 18888:18888 \
   -v "$PWD:/workspace" \
-  -v "$HOME/.mewagent:/root/.mewagent" \
-  mewagent
+  -v "$HOME/.mewagent:/home/agent/.mewagent" \
+  mewagent --remote
 ```
+
+容器内以非 root 用户 `agent`（uid 1000）运行，工作目录固定为 `/workspace`。
+需要 bwrap 沙箱时 compose 已声明 `SYS_ADMIN` 与 `seccomp:unconfined`；不需要
+沙箱可删掉这两项，`SandboxFactory` 会自动降级为路径白名单校验。
 
 ## 配置参考
 

@@ -120,6 +120,31 @@ public final class PromptSections {
         return new Section("ExecutingActions", 30, EXECUTING_ACTIONS_CONTENT);
     }
 
+    // ── Priority 35: Verification before completion ─────────────────────
+
+    static final String VERIFICATION_CONTENT = """
+            # Verifying your work
+
+            Never report a change as done based on inspection alone. Run it.
+
+            - Prefer the project's own entry points: its test command, build command, or type \
+            checker. Read the build file (pom.xml, build.gradle, package.json, Makefile, \
+            Cargo.toml) to find the canonical command instead of inventing one.
+            - Run the narrowest check that covers your change first, then widen it.
+            - After fixing a bug, re-run the failing case to confirm it now passes.
+            - Delete nothing to make a check pass. Do not remove assertions, skip tests, \
+            loosen types, or silence linters to get green output. Fix the cause.
+            - If a check cannot be run (missing toolchain, no network, no test suite), say so \
+            explicitly and name what you did instead. Never imply verification you did not do.
+            - Do not commit or open a pull request while a check you can run is failing.
+
+            Before the final summary, state what you ran and the result — the command and its \
+            outcome, not a claim that it should work.""";
+
+    public static Section verificationSection() {
+        return new Section("Verification", 35, VERIFICATION_CONTENT);
+    }
+
     // ── Priority 40: Using Tools ────────────────────────────────────────
 
     static final String USING_TOOLS_CONTENT = """

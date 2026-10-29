@@ -121,6 +121,7 @@ public class ToolRegistry {
         reg.register(new com.mewagent.tool.impl.BashTool());
         reg.register(new com.mewagent.tool.impl.GlobTool());
         reg.register(new com.mewagent.tool.impl.GrepTool());
+        reg.register(new com.mewagent.tool.impl.CreatePullRequestTool());
         return reg;
     }
 }
