@@ -39,7 +39,8 @@ MewAgent Java 适合这些场景：
 - **Agent 循环** — 多轮对话与自主工具调用。LLM 规划 → 执行工具 → 汇总结果，
   支持可配置的迭代上限和输出失败恢复。
 - **内置工具** — ReadFile、WriteFile、EditFile、Bash、Glob、Grep、ToolSearch、
-  TaskCreate、AskUser、EnterWorktree、ExitWorktree、ExitPlanMode、InstallSkill。
+  TaskCreate、AskUser、EnterWorktree、ExitWorktree、ExitPlanMode、InstallSkill、
+  CreatePullRequest（有前置校验，`gh` 缺失时降级为 compare 链接）。
 - **MCP 协议** — 连接任意 MCP 服务器（stdio / Streamable HTTP）作为外部工具，
   无需修改 MewAgent 即可扩展工具集合。
 - **技能系统** — 以 `SKILL.md` + YAML 前置元数据声明的轻量插件。延迟加载：
@@ -58,8 +59,10 @@ MewAgent Java 适合这些场景：
 - **沙箱执行** — bwrap / seatbelt 隔离 Bash 工具。
 - **计划模式** — 提案 → 审查 diff → 批准/拒绝后再应用更改。
 - **打印模式** — 非交互模式，使用 `-p` 参数单次提示并输出到 stdout。
-- **远程服务器** — 通过 `--remote` 标志启动 HTTP + WebSocket 服务器，供外部
-  客户端使用。
+- **远程服务器** — 通过 `--remote` 启动 HTTP + WebSocket 服务，附带内置 Web UI
+  与 REST 任务接口（`POST /task`），可供浏览器、编辑器插件和 CI 调用。
+- **容器化运行** — 多阶段 Docker 镜像，以非 root 用户运行；Linux 环境下
+  bubblewrap 沙箱开箱可用，不受 Windows 宿主降级路径的影响。
 - **会话管理** — 磁盘 JSONL 会话记录、带 diff 恢复的文件历史追踪。
 - **LLM 提供商** — Anthropic Messages API、OpenAI Chat Completions，以及
   OpenAI 兼容提供商（DeepSeek 等），通过 `openai-compat` 协议接入。
@@ -180,21 +183,20 @@ java -jar build/libs/mewagent.jar
 
 ## 连接你的编辑器
 
-通过 MewAgent 远程服务器连接外部客户端：
+远程模式启动一个 HTTP + WebSocket 服务，浏览器直接打开就是内置 Web UI，
+外部客户端也可以通过 WebSocket 接入：
 
 ```bash
-# 启动远程服务器
+# 已构建的 jar
 java -jar build/libs/mewagent.jar --remote=:18888
+
+# 或直接用 Gradle 跑
+.\gradlew.bat run --args='--remote'
 ```
 
-将任意 HTTP 客户端指向 `http://127.0.0.1:18888`，通过 WebSocket 进行 Agent
-交互。
-
-## 启动Remote方式
-
-```
- .\gradlew.bat run --args='--remote'
-```
+打开 `http://127.0.0.1:18888` 即进入 Web 界面。端口可省略，默认为 `18888`；
+需要监听所有网卡时用 `--remote=0.0.0.0:18888`（此时建议同时设置
+`MEWAGENT_TASK_TOKEN`，见下文）。
 
 ## REST 任务接口
 
@@ -305,6 +307,24 @@ docker run -it --rm -p 18888:18888 \
 需要 bwrap 沙箱时 compose 已声明 `SYS_ADMIN` 与 `seccomp:unconfined`；不需要
 沙箱可删掉这两项，`SandboxFactory` 会自动降级为路径白名单校验。
 
+### 访问与验证
+
+启动后浏览器打开 `http://127.0.0.1:18888` 即进入 Web UI。`--remote` 是服务模式，
+长期运行换成 `-d`；只有需要交互式 TUI 时才加 `-it`。
+
+```bash
+# 约 30 秒后转为 healthy（HEALTHCHECK 探测首页）
+docker ps --format '{{.Names}}\t{{.Status}}'
+
+# REST 接口连通性，未提交过任务时返回空列表
+curl -s http://127.0.0.1:18888/tasks
+# {"tasks":[],"count":0}
+```
+
+本机构建产物参考：镜像 723MB，容器内 `uid=1000(agent)`，`health=healthy`，
+访问不存在的任务返回 `404`。容器首次启动缺少配置文件时，入口会打印三种挂载
+方式并退出，不会静默失败。
+
 ### 网络受限时的构建
 
 `gradle-wrapper` 要从 `services.gradle.org` 下载发行版，而该域名会重定向到
@@ -360,15 +380,21 @@ MewAgent 读取项目根目录下的 `.mewagent/config.yaml`。
 src/main/java/com/mewagent/
 ├── MewAgent.java              # 入口（TUI、--remote、-p）
 ├── agent/                    # Agent 循环引擎
+├── command/                  # Slash 命令注册与执行
+├── compact/                  # 上下文压缩与恢复状态
 ├── config/                   # YAML 配置加载
 ├── conversation/             # 消息与轮次管理
+├── filehistory/              # 文件快照与回滚
+├── history/                  # 输入历史持久化
 ├── hook/                     # 生命周期钩子引擎
 ├── llm/                      # LLM 客户端（Anthropic、OpenAI、OpenAI-compat）
 ├── mcp/                      # MCP 协议客户端
 ├── memory/                   # 记忆扫描器、管理器、召回
 ├── permission/               # 权限模式
 ├── plan/                     # 计划模式
+├── print/                    # --print 非交互模式
 ├── prompt/                   # 提示词构建
+├── remote/                   # 远程服务（Web UI、WebSocket、REST 任务）
 ├── sandbox/                  # Bash 沙箱隔离
 ├── session/                  # 会话记录持久化
 ├── skill/                    # 技能目录与执行器
