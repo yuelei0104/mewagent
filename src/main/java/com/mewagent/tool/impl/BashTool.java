@@ -10,6 +10,9 @@ import com.mewagent.tool.ToolResult;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -17,6 +20,54 @@ import java.util.concurrent.TimeUnit;
 public class BashTool implements Tool {
 
     private static final int MAX_TIMEOUT = 600;
+
+    /**
+     * 解析可用的 shell 可执行文件。
+     *
+     * <p>Windows 上直接调用 {@code bash} 是个陷阱：PATH 里通常先命中
+     * {@code C:\Windows\System32\bash.exe}，那是 WSL 的启动器，会拉起
+     * {@code wsl.exe}——在禁用 WSL 或受限沙箱里直接失败，而且报错是 UTF-16
+     * 的 Windows 消息，工具侧只会看到乱码。这里按「显式配置 → Git Bash 常见
+     * 安装位置 → PATH 中排除 system32/WindowsApps」的顺序找一个真正的 Git Bash。
+     */
+    private static volatile String cachedShell;
+
+    public static String resolveShell() {
+        String cached = cachedShell;
+        if (cached != null) return cached;
+
+        String os = System.getProperty("os.name", "").toLowerCase();
+        String shell = "bash";
+        if (os.contains("win")) {
+            List<String> candidates = new ArrayList<>();
+            String override = System.getenv("MEWAGENT_BASH");
+            if (override != null && !override.isBlank()) candidates.add(override);
+            candidates.add("C:\\Program Files\\Git\\bin\\bash.exe");
+            candidates.add("C:\\Program Files\\Git\\usr\\bin\\bash.exe");
+            candidates.add("C:\\Program Files (x86)\\Git\\bin\\bash.exe");
+
+            String path = System.getenv("PATH");
+            if (path != null) {
+                for (String dir : path.split(java.io.File.pathSeparator)) {
+                    String lower = dir.toLowerCase();
+                    if (lower.contains("system32") || lower.contains("windowsapps")) continue;
+                    Path exe = Path.of(dir, "bash.exe");
+                    if (Files.isRegularFile(exe)) {
+                        candidates.add(exe.toString());
+                        break;
+                    }
+                }
+            }
+            for (String c : candidates) {
+                if (Files.isRegularFile(Path.of(c))) {
+                    shell = c;
+                    break;
+                }
+            }
+        }
+        cachedShell = shell;
+        return shell;
+    }
 
     // 特殊命令 exit code 1 的语义提示（grep 没匹配到、diff 文件有差异等）
     private static final Map<String, String> EXIT_ONE_HINTS = Map.of(
@@ -123,7 +174,7 @@ public class BashTool implements Tool {
                 actualCommand = sandbox.wrap(command, sandboxConfig);
             }
 
-            ProcessBuilder pb = new ProcessBuilder("bash", "-c", actualCommand);
+            ProcessBuilder pb = new ProcessBuilder(resolveShell(), "-c", actualCommand);
             // 合并 stdout 和 stderr 到同一个流，与 Claude Code 行为一致
             pb.redirectErrorStream(true);
 

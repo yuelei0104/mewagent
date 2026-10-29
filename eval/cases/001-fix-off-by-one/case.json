@@ -1,0 +1,7 @@
+{
+  "id": "001-fix-off-by-one",
+  "title": "修复分页越界：最后一页与超范围页码",
+  "prompt": "Pagination.page 在取最后一页和页码超出范围时会抛 IndexOutOfBoundsException。请修复，使最后一页返回剩余元素、超出范围返回空列表。不要修改方法签名，也不要改其他文件。",
+  "timeoutSec": 180,
+  "maxTurns": 12
+}

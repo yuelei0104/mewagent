@@ -1,0 +1,7 @@
+{
+  "id": "005-respect-conventions",
+  "title": "按项目规范（MEWAGENT.md）新增方法",
+  "prompt": "在 Metrics 中新增 public static double average(List<Double> values)：返回算术平均，空列表返回 0。请遵循本项目在 MEWAGENT.md 中规定的编码规范。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

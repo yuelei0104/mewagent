@@ -1,0 +1,7 @@
+{
+  "id": "003-rename-api",
+  "title": "跨文件重命名 API 并更新所有调用点",
+  "prompt": "把 UserRepository.getUserById 重命名为 findUserById，并更新项目里所有调用点。不要保留旧方法名，不要改变任何行为。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

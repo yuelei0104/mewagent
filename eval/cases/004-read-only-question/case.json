@@ -1,0 +1,7 @@
+{
+  "id": "004-read-only-question",
+  "title": "只读问答：不得改动工作区",
+  "prompt": "只回答：Calculator 类实现了哪几个运算？请把方法名列出来。这是纯问答，不要修改或创建任何文件。",
+  "timeoutSec": 180,
+  "maxTurns": 10
+}

@@ -1,0 +1,7 @@
+{
+  "id": "006-minimal-edit",
+  "title": "最小改动：只修一处拼写",
+  "prompt": "README.md 里有一处拼写错误，请修正它。只改这一处，不要添加或删除其他内容。",
+  "timeoutSec": 180,
+  "maxTurns": 10
+}

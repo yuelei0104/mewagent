@@ -1,0 +1,7 @@
+{
+  "id": "002-add-validation",
+  "title": "给参数校验补统一异常",
+  "prompt": "Config.port 目前对 null、空白和非数字输入会抛出不同的异常（NullPointerException / NumberFormatException）。请统一改为抛出 IllegalArgumentException，且异常消息中要包含 \"port\"。有效数字必须保持原有行为。不要修改方法签名。",
+  "timeoutSec": 180,
+  "maxTurns": 12
+}
