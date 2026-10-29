@@ -4,5 +4,19 @@ build/
 .idea/
 *.iml
 out/
+bin/
 .mewcode/
+.mewagent/
 CLAUDE.md
+
+# JVM 崩溃与重放日志
+hs_err_pid*.log
+replay_pid*.log
+
+# 本地备份与无关目录
+src.bak/
+shengyuban/
+.workbuddy/
+
+# 临时产物
+eval*.txt

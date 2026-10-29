@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+JAR="build/libs/mewagent.jar"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
+
+if [[ ! -f "$JAR" ]]; then
+    echo "[mewagent] Jar not found, building..."
+    if [[ -x "./gradlew" ]]; then
+        ./gradlew shadowJar
+    else
+        echo "[mewagent] gradlew not found."
+        exit 1
+    fi
+fi
+
+if [[ ! -f "$JAR" ]]; then
+    echo "[mewagent] Jar still missing after build: $JAR"
+    exit 1
+fi
+
+if ! command -v java >/dev/null 2>&1; then
+    echo "[mewagent] Java not found in PATH. Please install JDK 21 or set JAVA_HOME."
+    exit 1
+fi
+
+exec java -jar "$JAR" "$@"

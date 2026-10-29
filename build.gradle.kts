@@ -11,7 +11,7 @@ java {
 }
 
 application {
-    mainClass = "com.mewcode.MewCode"
+    mainClass = "com.mewagent.MewAgent"
 }
 
 repositories {
@@ -54,7 +54,7 @@ tasks.test {
 }
 
 tasks.shadowJar {
-    archiveBaseName = "mewcode"
+    archiveBaseName = "mewagent"
     archiveClassifier = ""
     archiveVersion = ""
     mergeServiceFiles()

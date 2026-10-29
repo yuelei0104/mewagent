@@ -1,20 +1,20 @@
-# MewCode
+# MewAgent
 
 [![Java](https://img.shields.io/badge/Java-21-blue)](https://www.java.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **简体中文**
 
-MewCode 是一款自托管的 AI 编程助手，运行在终端中。它在你的项目前运行一个
+MewAgent 是一款自托管的 AI 编程助手，运行在终端中。它在你的项目前运行一个
 LLM 驱动的 Agent，提供工具执行、MCP 协议扩展、技能系统、团队协作以及完整的
 控制平面。
 
-MewCode 面向单个开发者工作站或小型可信团队，不是一个公开的多租户 AI 平台或
+MewAgent 面向单个开发者工作站或小型可信团队，不是一个公开的多租户 AI 平台或
 模型网关。
 
 ## 项目定位
 
-MewCode Java 适合这些场景：
+MewAgent Java 适合这些场景：
 
 - 本地代码助手：在现有仓库里做阅读、修改、重构、排查问题。
 - Agent Runtime 原型：验证 `tool use`、`session resume`、`context compaction`、`MCP` 等能力。
@@ -29,8 +29,6 @@ MewCode Java 适合这些场景：
 
 ## 系统截图
 
-## 
-
 | ![image-20260709135245139](system_screenshot/image-20260709135245139.png) | ![image-20260709135338402](system_screenshot/image-20260709135338402.png) |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | ![image-20260709135354441](system_screenshot/image-20260709135354441.png) | ![image-20260709135429973](system_screenshot/image-20260709135429973.png) |
@@ -43,13 +41,13 @@ MewCode Java 适合这些场景：
 - **内置工具** — ReadFile、WriteFile、EditFile、Bash、Glob、Grep、ToolSearch、
   TaskCreate、AskUser、EnterWorktree、ExitWorktree、ExitPlanMode、InstallSkill。
 - **MCP 协议** — 连接任意 MCP 服务器（stdio / Streamable HTTP）作为外部工具，
-  无需修改 MewCode 即可扩展工具集合。
+  无需修改 MewAgent 即可扩展工具集合。
 - **技能系统** — 以 `SKILL.md` + YAML 前置元数据声明的轻量插件。延迟加载：
   上下文只保留名称和描述，完整 SOP 在意图匹配时按需加载。支持脚本、引用和模板。
 - **斜杠命令** — 技能注册为 `/command`，用户可直接触发。
 - **钩子系统** — 9 个生命周期事件、4 种执行器类型（命令、提示注入、HTTP 通知、
   子 Agent 任务）。`pre_tool_use` 支持通过参数内容拦截实现细粒度安全策略。
-- **记忆系统** — 用户级（`~/.mewcode/memory/`）和项目级（`.mewcode/memory/`）
+- **记忆系统** — 用户级（`~/.mewagent/memory/`）和项目级（`.mewagent/memory/`）
   持久化记忆文件。每 5 轮自动进行 LLM 提取。查询时通过侧查询选择器预取相关记忆。
 - **团队协作** — 生成子 Agent 作为队友，拥有独立终端和邮箱通信。支持协调者
   模式进行任务分发。支持 Tmux 和 iTerm 后端。
@@ -82,7 +80,7 @@ MewCode Java 适合这些场景：
 
 - **事件驱动钩子系统：** 9 个生命周期事件、4 种动作类型、支持 glob/regex/前缀
   条件匹配、once/async/onError 策略。所有钩子规则位于
-  `.mewcode/config.yaml`——用配置代替代码，无需重新编译。
+  `.mewagent/config.yaml`——用配置代替代码，无需重新编译。
 
 - **记忆召回：** 非阻塞预取与主 LLM 调用并行执行。侧查询选择器模型从用户级
   和项目级目录中选取相关记忆文件，在下一轮以 `system-reminder` 方式注入内容。
@@ -115,12 +113,22 @@ flowchart LR
 
 整体链路大致是：
 
-1. 启动程序并加载 `.mewcode/config.yaml`
+1. 启动程序并加载 `.mewagent/config.yaml`
 2. 初始化模型客户端、工具、权限、会话、记忆和 MCP
 3. 用户通过 TUI、Remote UI 或 Print Mode 发起请求
 4. Agent 调用模型，模型按需发起 `tool use`
 5. 工具结果写回上下文，必要时做上下文压缩
-6. 会话持久化到 `.mewcode/sessions`
+6. 会话持久化到 `.mewagent/sessions`
+
+
+
+## 升级迁移（MewCode → MewAgent）
+
+如果你从 MewCode 升级，首次启动时会自动把 `~/.mewcode/` 下的历史数据
+（sessions、memory、file-history、skills、config.yaml）迁移到 `~/.mewagent/`。
+原目录会保留为 `.mewcode.bak.<timestamp>` 直到下次启动后清理。
+
+环境变量从 `MEWCODE_CONFIG` 改为 `MEWAGENT_CONFIG`（旧值仍可读取，带弃用警告）。
 
 ## 快速开始
 
@@ -136,10 +144,10 @@ flowchart LR
 
 ```bash
 # 配置
-cp .mewcode/config.yaml.example .mewcode/config.yaml
+cp .mewagent/config.yaml.example .mewagent/config.yaml
 ```
 
-编辑 `.mewcode/config.yaml`，至少配置你的提供商：
+编辑 `.mewagent/config.yaml`，至少配置你的提供商：
 
 ```yaml
 providers:
@@ -161,22 +169,22 @@ mcp_servers:
 
 ```bash
 .\gradlew.bat shadowJar
-java -jar build/libs/mewcode.jar
+java -jar build/libs/mewagent.jar
 ```
 
 或使用启动脚本：
 
 ```bash
-./mewcode
+./mewagent
 ```
 
 ## 连接你的编辑器
 
-通过 MewCode 远程服务器连接外部客户端：
+通过 MewAgent 远程服务器连接外部客户端：
 
 ```bash
 # 启动远程服务器
-java -jar build/libs/mewcode.jar --remote=:18888
+java -jar build/libs/mewagent.jar --remote=:18888
 ```
 
 将任意 HTTP 客户端指向 `http://127.0.0.1:18888`，通过 WebSocket 进行 Agent
@@ -192,13 +200,13 @@ java -jar build/libs/mewcode.jar --remote=:18888
 
 ```bash
 # 启动 TUI
-java -jar build/libs/mewcode.jar
+java -jar build/libs/mewagent.jar
 
 # 打印模式（非交互）
-java -jar build/libs/mewcode.jar -p "列出 src/ 下所有 .java 文件"
+java -jar build/libs/mewagent.jar -p "列出 src/ 下所有 .java 文件"
 
 # 远程模式
-java -jar build/libs/mewcode.jar --remote=:18888
+java -jar build/libs/mewagent.jar --remote=:18888
 
 # 运行测试
 ./gradlew test
@@ -210,9 +218,9 @@ java -jar build/libs/mewcode.jar --remote=:18888
   调整。如果 LLM 批量生成并发工具调用，单轮可能超过此限制。
 - 权限模式防止意外写入。`default` 模式在写/破坏性操作前询问；`plan` 模式要求
   先提案再批准，之后才能执行工具。
-- 记忆提取每 5 轮自动执行一次。手动记忆文件可放入 `~/.mewcode/memory/`
-  （用户级）或 `.mewcode/memory/`（项目级）。
-- MCP 服务器进程由 MewCode 管理：按需启动，会话期间保持运行，关闭时终止。
+- 记忆提取每 5 轮自动执行一次。手动记忆文件可放入 `~/.mewagent/memory/`
+  （用户级）或 `.mewagent/memory/`（项目级）。
+- MCP 服务器进程由 MewAgent 管理：按需启动，会话期间保持运行，关闭时终止。
 - 上下文压缩在接近上下文窗口限制时自动触发。恢复状态写入会话 JSONL 文件，
   支持中断后恢复。
 - 远程模式（`--remote`）默认监听 localhost。暴露到网络需要 TLS 反向代理。
@@ -222,11 +230,11 @@ java -jar build/libs/mewcode.jar --remote=:18888
 
 ## 安全
 
-- 配置文件不要纳入版本控制。不要提交包含 API 密钥的 `.mewcode/config.yaml`。
+- 配置文件不要纳入版本控制。不要提交包含 API 密钥的 `.mewagent/config.yaml`。
 - 权限模式可防止意外写入文件和执行命令。
 - 沙箱执行（bwrap/seatbelt）启用后可隔离 Bash 命令与宿主系统。未启用沙箱时，
   Bash 工具拥有主机级访问权限。
-- MCP 服务器以子进程运行，权限与 MewCode 相同。只连接受信任的 MCP 服务器。
+- MCP 服务器以子进程运行，权限与 MewAgent 相同。只连接受信任的 MCP 服务器。
 - 远程模式（`--remote`）默认监听 localhost。使用 TLS 反向代理提供网络访问。
   不要将后端直接暴露到公网。
 - 从不可信来源加载的技能可能执行任意命令。安装前请审查 `SKILL.md` 文件。
@@ -236,16 +244,16 @@ java -jar build/libs/mewcode.jar --remote=:18888
 提供 Dockerfile 用于容器化部署：
 
 ```bash
-docker build -t mewcode .
+docker build -t mewagent .
 docker run -it --rm \
   -v "$PWD:/workspace" \
-  -v "$HOME/.mewcode:/root/.mewcode" \
-  mewcode
+  -v "$HOME/.mewagent:/root/.mewagent" \
+  mewagent
 ```
 
 ## 配置参考
 
-MewCode 读取项目根目录下的 `.mewcode/config.yaml`。
+MewAgent 读取项目根目录下的 `.mewagent/config.yaml`。
 
 | 配置段 | 用途 |
 |---|---|
@@ -259,8 +267,8 @@ MewCode 读取项目根目录下的 `.mewcode/config.yaml`。
 ## 项目结构
 
 ```
-src/main/java/com/mewcode/
-├── MewCode.java              # 入口（TUI、--remote、-p）
+src/main/java/com/mewagent/
+├── MewAgent.java              # 入口（TUI、--remote、-p）
 ├── agent/                    # Agent 循环引擎
 ├── config/                   # YAML 配置加载
 ├── conversation/             # 消息与轮次管理
@@ -288,7 +296,7 @@ src/main/java/com/mewcode/
 ```bash
 ./gradlew build        # 构建 shadow jar
 ./gradlew test         # 运行测试套件
-java -jar build/libs/mewcode.jar   # 运行 TUI
+java -jar build/libs/mewagent.jar   # 运行 TUI
 ```
 
 提交更改前，请运行完整测试套件并确认 TUI 能正常启动。
