@@ -417,7 +417,22 @@ java -jar build/libs/mewagent.jar   # 运行 TUI
 
 提交更改前，请运行完整测试套件并确认 TUI 能正常启动。
 
+## 评测
+
+单元测试只覆盖组件，不代表 Agent 能把任务做完。`eval/` 提供端到端评测：每个
+用例是一个独立的小仓库，由真实 Agent 去修改，改完用隐藏断言判定——断言脚本
+不在 Agent 的工作区内，它无法通过修改测试让自己通过。
+
+```bash
+./eval/run.sh                  # 全部用例
+./eval/run.sh --only=001,003   # 按 id 过滤
+./eval/run.sh --keep           # 保留工作区现场
+```
+
+结果输出到终端与 `build/eval/report.md`：通过率、平均轮次、耗时、token 消耗，
+以及失败分类（`no_action` / `check_failed` / `agent_error` / `timeout`）。
+用例的编写与扩展见 [eval/README.md](eval/README.md)。
+
 ## 许可证
 
 [MIT](LICENSE)
-// touched
