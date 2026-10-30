@@ -32,7 +32,7 @@ MewAgent Java 适合这些场景：
 | ![image-20260709135245139](system_screenshot/image-20260709135245139.png) | ![image-20260709135338402](system_screenshot/image-20260709135338402.png) |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | ![image-20260709135354441](system_screenshot/image-20260709135354441.png) | ![image-20260709135429973](system_screenshot/image-20260709135429973.png) |
-| ![](system_screenshot/image_2026-07-18_22-08-13.png)         | ![image-20260709164424704](system_screenshot/image-20260718220838.png) |
+| ![](system_screenshot/Snipaste_2026-10-30_14-41-06.jpg)      | ![image-20260709164424704](system_screenshot/Snipaste_2026-10-30_14-42-09.jpg) |
 
 ## 已实现的功能
 
