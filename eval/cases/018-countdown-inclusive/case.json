@@ -1,0 +1,7 @@
+{
+  "id": "018-countdown-inclusive",
+  "title": "倒计时必须包含 0",
+  "prompt": "Countdown.down 从 n 递减到 0 时漏掉了 0。请让它返回 [n, n-1, ..., 0]（n 为 0 时返回 [0]）。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

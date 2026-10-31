@@ -1,0 +1,7 @@
+{
+  "id": "020-banner-version",
+  "title": "最小改动：只改版本号",
+  "prompt": "把 Version.BANNER 的版本号从 v0.9.0 改成 v1.0.0，不要修改其他任何内容。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

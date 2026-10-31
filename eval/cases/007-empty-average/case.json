@@ -1,0 +1,7 @@
+{
+  "id": "007-empty-average",
+  "title": "空集合求平均不应抛异常",
+  "prompt": "Stats.average 在传入空列表时会因为除以 0 抛 ArithmeticException，传入 null 会 NPE。请让它对空列表和 null 都返回 0，其余情况行为不变。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

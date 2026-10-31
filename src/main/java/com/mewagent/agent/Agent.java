@@ -30,6 +30,30 @@ public class Agent {
     private static final int MAX_TOKENS_CEILING = 64_000;
     private static final int MAX_OUTPUT_RECOVERIES = 3;
 
+    /**
+     * 单个流式事件的最长等待秒数。
+     *
+     * <p>默认 30 秒，可用 {@code MEWAGENT_STREAM_TIMEOUT_SEC} 覆盖。评测里会调到 180：
+     * 模型首个 token 偶发超过 30 秒（冷启动 / 长系统提示 / 网络抖动），原本会把整轮直接
+     * 判死并记成 {@code agent_error}，看起来像 Agent 能力问题，实际只是等待不够。
+     */
+    private static final int STREAM_TIMEOUT_SEC = resolveStreamTimeout();
+
+    private static int resolveStreamTimeout() {
+        String value = System.getenv("MEWAGENT_STREAM_TIMEOUT_SEC");
+        if (value != null && !value.isBlank()) {
+            try {
+                int seconds = Integer.parseInt(value.trim());
+                if (seconds > 0 && seconds <= 3600) {
+                    return seconds;
+                }
+            } catch (NumberFormatException ignored) {
+                // 非法值退回默认
+            }
+        }
+        return 30;
+    }
+
     private final LlmClient client;
     private final ToolRegistry registry;
     private final String protocol;
@@ -245,7 +269,7 @@ public class Agent {
             while (true) {
                 StreamEvent event;
                 try {
-                    event = streamQueue.poll(30, TimeUnit.SECONDS);
+                    event = streamQueue.poll(STREAM_TIMEOUT_SEC, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;

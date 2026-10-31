@@ -423,6 +423,10 @@ java -jar build/libs/mewagent.jar   # 运行 TUI
 用例是一个独立的小仓库，由真实 Agent 去修改，改完用隐藏断言判定——断言脚本
 不在 Agent 的工作区内，它无法通过修改测试让自己通过。
 
+当前 20 个用例，覆盖单文件修复、跨文件重命名、跨文件方法抽取、边界条件、异常契约、
+状态机、区间合并、回归保护（`019` 带基线测试）以及两个反向用例（`004` 只读问答、
+`006` 最小改动）。
+
 ```bash
 ./eval/run.sh                  # 全部用例
 ./eval/run.sh --only=001,003   # 按 id 过滤
@@ -431,6 +435,10 @@ java -jar build/libs/mewagent.jar   # 运行 TUI
 
 结果输出到终端与 `build/eval/report.md`：通过率、平均轮次、耗时、token 消耗，
 以及失败分类（`no_action` / `check_failed` / `agent_error` / `timeout`）。
+
+评测里会把 `MEWAGENT_STREAM_TIMEOUT_SEC` 设为 180：模型首个 token 偶发超过默认
+30 秒，若不放宽会被记成 `agent_error`，看起来像 Agent 失败。
+
 用例的编写与扩展见 [eval/README.md](eval/README.md)。
 
 ## 许可证

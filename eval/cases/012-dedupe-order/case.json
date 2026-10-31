@@ -1,0 +1,7 @@
+{
+  "id": "012-dedupe-order",
+  "title": "去重必须保持原顺序",
+  "prompt": "Dedup.unique 用 HashSet 去重，结果顺序被打乱。请改成去重但保持首次出现的顺序。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

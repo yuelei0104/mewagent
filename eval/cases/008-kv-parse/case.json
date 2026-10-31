@@ -1,0 +1,7 @@
+{
+  "id": "008-kv-parse",
+  "title": "键值串解析的边界",
+  "prompt": "Kv.parse 在解析 \"a=1;b=2;\" 这类结尾带分号的输入时会抛 ArrayIndexOutOfBoundsException，空值 \"a=\" 也会出错。请让它忽略空段、支持空值，并对键和值去掉首尾空白。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

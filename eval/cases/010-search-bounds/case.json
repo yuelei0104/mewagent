@@ -1,0 +1,7 @@
+{
+  "id": "010-search-bounds",
+  "title": "二分查找的越界与未命中",
+  "prompt": "Search.indexOf 在目标不存在（或数组为空）时会抛 ArrayIndexOutOfBoundsException。请修复，使未命中返回 -1、命中返回下标，空数组也返回 -1。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

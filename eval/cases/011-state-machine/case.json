@@ -1,0 +1,7 @@
+{
+  "id": "011-state-machine",
+  "title": "订单状态机不允许回退",
+  "prompt": "Order.next 现在允许 SHIPPED 回到 PAID，这是非法的。请去掉这条转换，保留 NEW→PAID、PAID→SHIPPED，其余状态仍然抛 IllegalStateException。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

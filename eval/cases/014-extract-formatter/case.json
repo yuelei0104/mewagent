@@ -1,0 +1,7 @@
+{
+  "id": "014-extract-formatter",
+  "title": "把格式化逻辑抽到新类",
+  "prompt": "Money.format 只被 Invoice 使用。请把格式化逻辑迁移到新的 Formatter.format(long cents)，让 Invoice 改用它，并从 Money 中删掉 format 方法（Money 类可以保留为空类）。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

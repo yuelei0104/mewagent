@@ -177,6 +177,8 @@ public final class EvalRunner {
 
         ProcessBuilder pb = new ProcessBuilder(cmd).directory(work.toFile());
         pb.environment().put("MEWAGENT_CONFIG", config);
+        // 评测放宽流式超时：模型首 token 偶发超过默认 30 秒，不该被记成 agent_error
+        pb.environment().put("MEWAGENT_STREAM_TIMEOUT_SEC", "180");
         // 宿主 shell 里的 http_proxy 常指向沙箱/本地代理，容器或评测环境里并不存在，
         // 被 SDK 继承后所有 LLM 请求都会卡死。默认清掉，需要时用 --inherit-proxy。
         if (!inheritProxy) {

@@ -1,0 +1,7 @@
+{
+  "id": "017-merge-adjacent",
+  "title": "相邻区间也要合并",
+  "prompt": "Intervals.merge 只合并了重叠区间，首尾相接的区间（如 [1,2] 与 [2,3]）没有合并。请让相接的区间也合并，输出按起点升序。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

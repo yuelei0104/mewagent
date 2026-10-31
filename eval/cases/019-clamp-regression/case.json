@@ -1,0 +1,7 @@
+{
+  "id": "019-clamp-regression",
+  "title": "修下界时不能破坏上界",
+  "prompt": "Clamp.clamp 在 value 小于下界时错误地返回了上界。请修复下界分支，同时保证上界分支仍然正确（已有回归测试会检查）。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

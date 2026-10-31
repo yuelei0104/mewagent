@@ -1,0 +1,7 @@
+{
+  "id": "015-config-default",
+  "title": "缺失或空白的配置要回退默认值",
+  "prompt": "Config.get 在键不存在时返回 null、值为空白时返回空白串。请改为：键不存在或值为空白时返回 fallback，否则返回去空白后的值。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

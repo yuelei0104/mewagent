@@ -1,0 +1,7 @@
+{
+  "id": "016-page-beyond-end",
+  "title": "超出范围的页码应返回空",
+  "prompt": "Paginator.page 在页码超出范围时返回了最后一页，应该返回空列表。正常页码（含最后一页不满一页）的行为保持不变。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

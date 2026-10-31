@@ -1,0 +1,7 @@
+{
+  "id": "013-exception-contract",
+  "title": "非法端口要抛 IllegalArgumentException",
+  "prompt": "Ports.parse 遇到非数字输入时抛的是 NumberFormatException。请改为抛 IllegalArgumentException，消息里包含 \"invalid port\"；超出 1..65535 时仍抛 IllegalArgumentException 且消息包含 \"out of range\"。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}

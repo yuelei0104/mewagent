@@ -1,0 +1,7 @@
+{
+  "id": "009-rename-accessor",
+  "title": "跨三个文件重命名访问器",
+  "prompt": "Account.getUserName 需要重命名为 getDisplayName，并同步修改 ProfileService 和 AccountMapper 两个调用方。只改方法名，不要改变行为，也不要留下旧方法名。",
+  "timeoutSec": 240,
+  "maxTurns": 16
+}
