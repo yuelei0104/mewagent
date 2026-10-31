@@ -74,165 +74,26 @@ public class PrintMode {
         var options = new PromptBuilder.BuildOptions(null, null, null);
         String systemPrompt = PromptBuilder.buildSystemPrompt(env, options);
 
-        // ── 创建 LLM 客户端 ─────────────────────────────────────────────
-        LlmClient client = LlmClient.create(providerCfg, systemPrompt);
-        String protocol = providerCfg.getProtocol();
+        // ── 统一装配：工具 / 权限 / 文件历史 / Hook / 技能 / MCP ───────────
+        var opts = new com.mewagent.agent.AgentSessionFactory.Options();
+        opts.workDir = workDir;
+        opts.provider = providerCfg;
+        opts.systemPrompt = systemPrompt;
+        opts.permissionMode = PermissionMode.BYPASS;   // print 模式无人值守，自动放行
+        opts.hooks = hookConfigs;
+        opts.mcpServers = mcpConfigs;
+        opts.coordinatorMode = config.isEnableCoordinatorMode();
+        opts.instructions = instructionsContent;
+        var session = com.mewagent.agent.AgentSessionFactory.create(opts);
 
-        // ── 工具注册 ────────────────────────────────────────────────────
-        ToolRegistry registry = ToolRegistry.createDefault();
-        registry.register(new ToolSearchTool(registry, protocol));
-
-        var exitPlanTool = new com.mewagent.tool.impl.ExitPlanModeTool();
-        exitPlanTool.setIsPlanMode(() -> false); // print 模式不用 plan
-        exitPlanTool.setPlanExists(() -> false);
-        registry.register(exitPlanTool);
-
-        // AskUser 工具：print 模式下自动返回空答案
-        AskUserTool askUserTool = new AskUserTool();
-        registry.register(askUserTool);
-
-        // ── 子 Agent 工具 ───────────────────────────────────────────────
-        var agentTool = new AgentTool(client, registry, protocol, providerCfg);
-        SubAgentTaskManager subAgentTaskManager = new SubAgentTaskManager();
-        agentTool.setTaskManager(subAgentTaskManager);
-        registry.register(agentTool);
-
-        // ── Worktree 工具 ───────────────────────────────────────────────
-        var worktreeManager = new WorktreeManager(workDir, List.of(), 720);
-        agentTool.setWorktreeManager(worktreeManager);
-        String sessionId = SessionManager.newId();
-        registry.register(new com.mewagent.tool.impl.EnterWorktreeTool(worktreeManager, sessionId));
-        registry.register(new com.mewagent.tool.impl.ExitWorktreeTool(worktreeManager));
-
-        // ── 任务工具 ────────────────────────────────────────────────────
-        TaskList taskList = new TaskList("default", workDir);
-        registry.register(new TaskTools.TaskCreateTool(taskList));
-        registry.register(new TaskTools.TaskGetTool(taskList));
-        registry.register(new TaskTools.TaskListTool(taskList));
-        registry.register(new TaskTools.TaskUpdateTool(taskList));
-
-        // ── 团队工具 ────────────────────────────────────────────────────
-        TeamManager teamManager = new TeamManager();
-        agentTool.setTeamManager(teamManager);
-        registry.register(new com.mewagent.teams.TeamTools.TeamCreateTool(teamManager));
-        registry.register(new com.mewagent.teams.TeamTools.TeamDeleteTool(teamManager));
-        registry.register(new com.mewagent.teams.TeamTools.SendMessageTool(teamManager, "lead"));
-
-        // ── 权限检查器：BYPASS 模式，自动批准所有操作 ──────────────────
-        PermissionChecker permChecker = new PermissionChecker(PermissionMode.BYPASS, Path.of(workDir));
-
-        // ── 会话和文件历史 ──────────────────────────────────────────────
-        FileHistory fileHistory = new FileHistory(workDir, sessionId);
-        var fileStateCache = new com.mewagent.tool.FileStateCache();
-        for (var tool : registry.listTools()) {
-            if (tool instanceof com.mewagent.tool.impl.EditFileTool ef) {
-                ef.setFileHistory(fileHistory);
-                ef.setFileStateCache(fileStateCache);
-            }
-            if (tool instanceof com.mewagent.tool.impl.WriteFileTool wf) {
-                wf.setFileHistory(fileHistory);
-                wf.setFileStateCache(fileStateCache);
-            }
-            if (tool instanceof com.mewagent.tool.impl.ReadFileTool rf) {
-                rf.setFileStateCache(fileStateCache);
-            }
-        }
-
-        // ── 构建 Agent ──────────────────────────────────────────────────
-        ConversationManager conversation = new ConversationManager();
-        Agent agent = new Agent(client, registry, protocol, providerCfg);
-        agent.setFileHistory(fileHistory);
-        agent.setInstructions(instructionsContent);
-        agent.setChecker(permChecker);
-        agent.setWorkDir(workDir);
-        agent.setSessionId(sessionId);
-
-        // 通知函数：排空团队邮箱和任务通知
-        agent.setNotificationFn(() -> {
-            var notes = new ArrayList<String>();
-            notes.addAll(com.mewagent.teams.TeammateRunner.drainLeadMailbox(teamManager));
-            for (var n : subAgentTaskManager.drainNotifications()) {
-                notes.add("<task-notification>Task %s: %s (%s)</task-notification>"
-                        .formatted(n.taskId(), n.name(), n.status()));
-            }
-            return notes;
-        });
-
-        // 工具名过滤器（团队协调模式）
-        agent.setToolNameFilter(name -> {
-            if (!config.isEnableCoordinatorMode()) return true;
-            if (teamManager.listTeams().isEmpty()) return true;
-            return com.mewagent.teams.Coordinator.isCoordinatorTool(name);
-        });
-
-        // 子 Agent 关联
-        if (registry.get("Agent") instanceof AgentTool at) {
-            at.setProgressListener(progress -> {}); // print 模式不需要进度回调
-        }
-
-        // ── Hook 引擎 ──────────────────────────────────────────────────
-        HookEngine hookEngine = new HookEngine();
-        if (!hookConfigs.isEmpty()) {
-            List<HookEngine.Hook> hooks = hookConfigs.stream().map(hc -> {
-                HookEngine.EventName event = parseEventName(hc.getEvent());
-                HookEngine.ActionType actionType = parseActionType(hc.getType());
-                Duration timeout = hc.getTimeout() > 0
-                        ? Duration.ofSeconds(hc.getTimeout()) : Duration.ZERO;
-                var action = new HookEngine.Action(actionType, hc.getCommand(), hc.getMessage(),
-                        hc.getUrl(), hc.getMethod(), hc.getHeaders(), hc.getBody(), timeout);
-                return new HookEngine.Hook(hc.getId(), event, hc.getCondition(), action,
-                        hc.isReject(), hc.isOnce(), hc.isAsync(), hc.getOnError());
-            }).toList();
-            hookEngine.loadHooks(hooks);
-        }
-        agent.setHookEngine(hookEngine);
-
-        // ── Skill 加载 ──────────────────────────────────────────────────
-        SkillCatalog skillCatalog = new SkillCatalog();
-        var skillDir = Path.of(workDir, ".mewagent", "skills");
-        if (Files.isDirectory(skillDir)) {
-            skillCatalog.loadFromDirectory(skillDir);
-        }
-
-        // ── MCP 服务器连接 ──────────────────────────────────────────────
-        String mcpInstructions = "";
-        if (!mcpConfigs.isEmpty()) {
-            try {
-                McpManager mcpManager = new McpManager(mcpConfigs);
-                var result = mcpManager.connectAll();
-                for (var t : result.tools()) registry.register(t);
-                for (var e : result.errors()) System.err.println("MCP error: " + e);
-
-                if (!result.servers().isEmpty()) {
-                    var mcpParts = new ArrayList<String>();
-                    for (var s : result.servers()) {
-                        var sb = new StringBuilder();
-                        sb.append("## ").append(s.name()).append("\n");
-                        if (s.instructions() != null && !s.instructions().isBlank()) {
-                            sb.append(s.instructions()).append("\n");
-                        }
-                        var toolNames = registry.listTools().stream()
-                                .filter(t -> t.name().startsWith("mcp__" + s.name() + "__"))
-                                .map(com.mewagent.tool.Tool::name)
-                                .toList();
-                        if (!toolNames.isEmpty()) {
-                            sb.append("\nAvailable tools: ").append(String.join(", ", toolNames));
-                        }
-                        mcpParts.add(sb.toString());
-                    }
-                    mcpInstructions = "# MCP Server Instructions\n\n"
-                            + "The following MCP servers are connected. Use their tools when the user asks.\n\n"
-                            + String.join("\n\n", mcpParts);
-                }
-            } catch (Exception e) {
-                System.err.println("MCP init failed: " + e.getMessage());
-            }
-        }
+        Agent agent = session.agent;
+        ConversationManager conversation = session.conversation;
+        AskUserTool askUserTool = session.askUserTool;
 
         // ── 注入用户消息并启动 Agent ─────────────────────────────────────
         conversation.addUserMessage(prompt);
-        if (!mcpInstructions.isEmpty()) {
-            conversation.addSystemReminder(mcpInstructions);
+        if (!session.mcpInstructions.isEmpty()) {
+            conversation.addSystemReminder(session.mcpInstructions);
         }
 
         BlockingQueue<AgentEvent> queue = agent.run(conversation);

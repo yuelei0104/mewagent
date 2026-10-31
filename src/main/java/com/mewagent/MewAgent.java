@@ -76,6 +76,9 @@ public class MewAgent {
                     ? PrintMode.OutputFormat.STREAM_JSON
                     : PrintMode.OutputFormat.TEXT;
             PrintMode.run(config, printPrompt, fmt);
+            // LLM SDK 会创建非守护线程池，run() 正常返回后 JVM 也不会退出。
+            // 这里显式退出，否则脚本 / eval 跑分器会一直等到超时，把跑完的用例误判为 timeout。
+            System.exit(0);
             return;
         }
 

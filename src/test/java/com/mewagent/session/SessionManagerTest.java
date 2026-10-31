@@ -224,4 +224,83 @@ class SessionManagerTest {
         SessionManager.saveCompactBoundary(dir.toString(), null, "x", List.of());
         assertTrue(SessionManager.loadSession(dir.toString(), "").isEmpty());
     }
+
+    // ---- Generated session titles ----
+
+    @Test
+    void titleRecordIsHiddenFromLoadSessionButSurfacedByListSessions(@TempDir Path dir) {
+        String workDir = dir.toString();
+        String sessionId = "20260101-120000";
+
+        SessionManager.saveMessage(workDir, sessionId, "user", "把工具执行改成读写分批并发");
+        SessionManager.saveMessage(workDir, sessionId, "assistant", "改好了");
+        SessionManager.saveTitle(workDir, sessionId, "重构工具执行分批并发");
+
+        var loaded = SessionManager.loadSession(workDir, sessionId);
+        assertEquals(2, loaded.size(), "title record must not appear as a conversation message");
+        assertTrue(loaded.stream().noneMatch(m -> SessionManager.TYPE_TITLE.equals(m.type())));
+
+        assertEquals("重构工具执行分批并发", SessionManager.readTitle(workDir, sessionId));
+
+        var sessions = SessionManager.listSessions(workDir);
+        assertEquals(1, sessions.size());
+        assertEquals("重构工具执行分批并发", sessions.get(0).title());
+        assertEquals(2, sessions.get(0).messageCount(), "title must not inflate the message count");
+    }
+
+    @Test
+    void replayIgnoresTitleRecord(@TempDir Path dir) {
+        String workDir = dir.toString();
+        String sessionId = "20260101-130000";
+
+        SessionManager.saveMessage(workDir, sessionId, "user", "第一个问题");
+        SessionManager.saveTitle(workDir, sessionId, "第一个问题");
+        SessionManager.saveMessage(workDir, sessionId, "assistant", "回答");
+
+        var conversation = SessionManager.rebuildConversation(
+                SessionManager.loadSession(workDir, sessionId));
+
+        assertEquals(2, conversation.getMessages().size());
+        assertEquals("第一个问题", conversation.getMessages().get(0).getContent());
+        assertEquals("回答", conversation.getMessages().get(1).getContent());
+    }
+
+    @Test
+    void readTitleReturnsNullWhenAbsentOrBlank(@TempDir Path dir) {
+        String workDir = dir.toString();
+        String sessionId = "20260101-140000";
+
+        SessionManager.saveMessage(workDir, sessionId, "user", "没有标题的老会话");
+        assertNull(SessionManager.readTitle(workDir, sessionId));
+
+        // 空/空白标题不应写盘，也不应覆盖"没有标题"的状态
+        SessionManager.saveTitle(workDir, sessionId, "");
+        SessionManager.saveTitle(workDir, sessionId, "   ");
+        assertNull(SessionManager.readTitle(workDir, sessionId));
+
+        assertEquals(1, SessionManager.loadSession(workDir, sessionId).size());
+    }
+
+    @Test
+    void latestTitleWins(@TempDir Path dir) {
+        String workDir = dir.toString();
+        String sessionId = "20260101-150000";
+
+        SessionManager.saveMessage(workDir, sessionId, "user", "任务");
+        SessionManager.saveTitle(workDir, sessionId, "旧标题");
+        SessionManager.saveTitle(workDir, sessionId, "新标题");
+
+        assertEquals("新标题", SessionManager.readTitle(workDir, sessionId));
+    }
+
+    @Test
+    void titleSanitizerStripsQuotesPrefixPunctuationAndExtraLines() {
+        assertEquals("重构工具执行分批并发", SessionTitleGenerator.sanitize("重构工具执行分批并发"));
+        assertEquals("重构工具执行分批并发", SessionTitleGenerator.sanitize("「重构工具执行分批并发」。"));
+        assertEquals("重构工具执行分批并发", SessionTitleGenerator.sanitize("标题：重构工具执行分批并发"));
+        assertEquals("重构工具执行分批并发", SessionTitleGenerator.sanitize("  \"重构工具执行分批并发\"  \n解释：随便说两句"));
+        assertNull(SessionTitleGenerator.sanitize(""));
+        assertNull(SessionTitleGenerator.sanitize("   \n  "));
+        assertNull(SessionTitleGenerator.sanitize(null));
+    }
 }

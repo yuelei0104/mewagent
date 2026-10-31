@@ -4,6 +4,7 @@ package com.mewagent.remote;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mewagent.agent.Agent;
+import com.mewagent.agent.AgentSessionFactory;
 import com.mewagent.agent.AgentEvent;
 import com.mewagent.command.Command;
 import com.mewagent.command.CommandContext;
@@ -24,6 +25,7 @@ import com.mewagent.permission.PermissionResponse;
 import com.mewagent.plan.PlanFile;
 import com.mewagent.prompt.PromptBuilder;
 import com.mewagent.session.SessionManager;
+import com.mewagent.session.SessionTitleGenerator;
 import com.mewagent.skill.SkillCatalog;
 import com.mewagent.subagent.AgentTool;
 import com.mewagent.subagent.SubAgentTaskManager;
@@ -103,6 +105,16 @@ public class RemoteServer {
     private String memoryContent = "";
     private volatile String mcpInstructions = "";
     private final boolean enableCoordinatorMode;
+
+    // ── 会话标题生成 ─────────────────────────────────────────────────
+    /** 首轮结束后异步生成侧栏标题；失败则前端回退到首条消息。 */
+    private SessionTitleGenerator titleGenerator;
+    /** 已经尝试过生成标题的 session id，避免每轮都重复调用模型。 */
+    private volatile String titleAttemptedFor = "";
+    /** 本轮用户输入原文，用于生成标题（对话里的首条 user 消息可能被记忆注入污染）。 */
+    private volatile String pendingUserPrompt = "";
+    /** /retitle 单次最多补多少个历史会话，避免一次烧掉太多调用。 */
+    private static final int RETITLE_LIMIT = 20;
 
     // ── REST 任务接口 ─────────────────────────────────────────────────
     /**
@@ -195,7 +207,7 @@ public class RemoteServer {
         String workDir = System.getProperty("user.dir");
         ProviderConfig providerCfg = providers.get(0);
 
-        // 记忆管理
+        // 记忆管理：用户/项目指令 + 长期记忆
         memoryManager = new MemoryManager(workDir);
         instructionsContent = MemoryManager.loadInstructions(workDir);
 
@@ -204,131 +216,44 @@ public class RemoteServer {
         var options = new PromptBuilder.BuildOptions(null, null, null);
         String systemPrompt = PromptBuilder.buildSystemPrompt(env, options);
 
-        // 创建 LLM 客户端
-        client = LlmClient.create(providerCfg, systemPrompt);
-        String protocol = providerCfg.getProtocol();
+        // 会话标题生成器：独立 client，避免与主对话争用系统提示
+        titleGenerator = new SessionTitleGenerator(providerCfg);
 
-        // 工具注册
-        registry = ToolRegistry.createDefault();
-        registry.register(new ToolSearchTool(registry, protocol));
+        // ── 统一装配：工具 / 权限 / 文件历史 / Hook / 技能 ──────────────
+        var opts = new AgentSessionFactory.Options();
+        opts.workDir = workDir;
+        opts.provider = providerCfg;
+        opts.systemPrompt = systemPrompt;
+        opts.permissionMode = PermissionMode.DEFAULT;
+        opts.hooks = hookConfigs;
+        opts.coordinatorMode = enableCoordinatorMode;
+        opts.instructions = instructionsContent;
+        // 修复漂移：以前这里传的是空串，远程模式实际上没有记忆注入
+        opts.memory = MemoryManager.renderMemorySection(workDir);
+        opts.connectMcp = false;   // MCP 由 initMcpServers 单独处理
+        opts.progressListener = progress -> {};
 
-        var exitPlanTool = new com.mewagent.tool.impl.ExitPlanModeTool();
-        exitPlanTool.setIsPlanMode(() -> permChecker != null && permChecker.getMode() == PermissionMode.PLAN);
-        exitPlanTool.setPlanExists(() -> PlanFile.planExists());
-        registry.register(exitPlanTool);
+        var session = AgentSessionFactory.create(opts);
 
-        // AskUser 工具：Remote 模式通过事件队列桥接到 WebSocket
-        askUserTool = new AskUserTool();
-        registry.register(askUserTool);
-
-        // 子 Agent 工具
-        var agentToolRef = new AgentTool(client, registry, protocol, providerCfg);
-        subAgentTaskManager = new SubAgentTaskManager();
-        agentToolRef.setTaskManager(subAgentTaskManager);
-        registry.register(agentToolRef);
-
-        // Worktree 工具
-        var worktreeManager = new WorktreeManager(workDir, List.of(), 720);
-        agentToolRef.setWorktreeManager(worktreeManager);
-        sessionId = SessionManager.newId();
-        registry.register(new com.mewagent.tool.impl.EnterWorktreeTool(worktreeManager, sessionId));
-        registry.register(new com.mewagent.tool.impl.ExitWorktreeTool(worktreeManager));
-
-        // 任务工具
-        taskList = new TaskList("default", workDir);
-        registry.register(new TaskTools.TaskCreateTool(taskList));
-        registry.register(new TaskTools.TaskGetTool(taskList));
-        registry.register(new TaskTools.TaskListTool(taskList));
-        registry.register(new TaskTools.TaskUpdateTool(taskList));
-
-        // 团队工具
-        teamManager = new TeamManager();
-        agentToolRef.setTeamManager(teamManager);
-        registry.register(new com.mewagent.teams.TeamTools.TeamCreateTool(teamManager));
-        registry.register(new com.mewagent.teams.TeamTools.TeamDeleteTool(teamManager));
-        registry.register(new com.mewagent.teams.TeamTools.SendMessageTool(teamManager, "lead"));
-
-        // 权限检查器
-        permChecker = new PermissionChecker(PermissionMode.DEFAULT, Path.of(workDir));
-
-        // 会话和文件历史
-        fileHistory = new FileHistory(workDir, sessionId);
-        var fileStateCache = new com.mewagent.tool.FileStateCache();
-        for (var tool : registry.listTools()) {
-            if (tool instanceof com.mewagent.tool.impl.EditFileTool ef) {
-                ef.setFileHistory(fileHistory);
-                ef.setFileStateCache(fileStateCache);
-            }
-            if (tool instanceof com.mewagent.tool.impl.WriteFileTool wf) {
-                wf.setFileHistory(fileHistory);
-                wf.setFileStateCache(fileStateCache);
-            }
-            if (tool instanceof com.mewagent.tool.impl.ReadFileTool rf) {
-                rf.setFileStateCache(fileStateCache);
-            }
-        }
-
-        // 构建 Agent
-        conversation = new ConversationManager();
-        agent = new Agent(client, registry, protocol, providerCfg);
-        agent.setFileHistory(fileHistory);
-        agent.setInstructions(instructionsContent);
-        agent.setMemoryContent(memoryContent);
-        agent.setChecker(permChecker);
-        agent.setWorkDir(workDir);
-        agent.setSessionId(sessionId);
-
-        // 通知函数：排空团队邮箱和任务通知
-        agent.setNotificationFn(() -> {
-            var notes = new ArrayList<String>();
-            notes.addAll(com.mewagent.teams.TeammateRunner.drainLeadMailbox(teamManager));
-            if (subAgentTaskManager != null) {
-                for (var n : subAgentTaskManager.drainNotifications()) {
-                    notes.add("<task-notification>Task %s: %s (%s)</task-notification>"
-                            .formatted(n.taskId(), n.name(), n.status()));
-                }
-            }
-            return notes;
-        });
-
-        // 工具名过滤器（团队协调模式）
-        agent.setToolNameFilter(name -> {
-            if (!enableCoordinatorMode) return true;
-            if (teamManager.listTeams().isEmpty()) return true;
-            return com.mewagent.teams.Coordinator.isCoordinatorTool(name);
-        });
-
-        // 子 Agent 关联
-        if (registry.get("Agent") instanceof AgentTool at) {
-            at.setProgressListener(progress -> {}); // remote 模式不需要 TUI 进度回调
-        }
-
-        // Hook 引擎
-        hookEngine = new HookEngine();
-        if (hookConfigs != null && !hookConfigs.isEmpty()) {
-            List<HookEngine.Hook> hooks = hookConfigs.stream().map(hc -> {
-                HookEngine.EventName event = parseEventName(hc.getEvent());
-                HookEngine.ActionType actionType = parseActionType(hc.getType());
-                Duration timeout = hc.getTimeout() > 0
-                        ? Duration.ofSeconds(hc.getTimeout()) : Duration.ZERO;
-                var action = new HookEngine.Action(actionType, hc.getCommand(), hc.getMessage(),
-                        hc.getUrl(), hc.getMethod(), hc.getHeaders(), hc.getBody(), timeout);
-                return new HookEngine.Hook(hc.getId(), event, hc.getCondition(), action,
-                        hc.isReject(), hc.isOnce(), hc.isAsync(), hc.getOnError());
-            }).toList();
-            hookEngine.loadHooks(hooks);
-        }
-        agent.setHookEngine(hookEngine);
-
-        // Skill 加载
-        skillCatalog = new SkillCatalog();
-        var skillDir = Path.of(workDir, ".mewagent", "skills");
-        if (Files.isDirectory(skillDir)) {
-            skillCatalog.loadFromDirectory(skillDir);
-        }
+        agent = session.agent;
+        registry = session.registry;
+        client = session.client;
+        conversation = session.conversation;
+        permChecker = session.checker;
+        fileHistory = session.fileHistory;
+        askUserTool = session.askUserTool;
+        subAgentTaskManager = session.subAgentTasks;
+        teamManager = session.teamManager;
+        sessionId = session.sessionId;
+        skillCatalog = session.skillCatalog;
+        hookEngine = session.hookEngine;
 
         // 命令注册
         cmdRegistry = new CommandRegistry();
+        // 仅 remote 模式提供：为历史会话补生成标题
+        cmdRegistry.register(new Command("retitle", "为缺少标题的历史会话生成标题（最多 20 个）",
+                new String[0], Command.CommandType.LOCAL_UI, false), null);
+
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -486,11 +411,133 @@ public class RemoteServer {
                 sessions.stream().map(s -> Map.of(
                         "id", s.id(),
                         "firstMessage", s.firstMessage().length() > 80 ? s.firstMessage().substring(0, 80) + "..." : s.firstMessage(),
+                        "title", s.title() == null ? "" : s.title(),
                         "messageCount", s.messageCount(),
                         "modTime", s.modTime().toString(),
                         "relativeTime", SessionManager.formatRelativeTime(s.modTime()),
                         "fileSize", SessionManager.formatFileSize(s.fileSize())
                 )).toList()));
+    }
+
+    /**
+     * 首轮结束后异步生成会话标题。
+     *
+     * <p>每个 session 只尝试一次；已有标题（老会话或被恢复的会话）直接跳过。
+     * 生成成功才写盘并刷新侧栏，失败静默放弃——前端会回退到首条消息。
+     */
+    private void maybeGenerateTitle() {
+        final String sid = sessionId;
+        final String workDir = System.getProperty("user.dir");
+        if (sid == null || sid.isBlank() || titleGenerator == null) {
+            return;
+        }
+        if (sid.equals(titleAttemptedFor)) {
+            return;
+        }
+        titleAttemptedFor = sid;
+        if (SessionManager.readTitle(workDir, sid) != null) {
+            return; // 已有标题，不重复生成
+        }
+        final String userText = pendingUserPrompt;
+        if (userText == null || userText.isBlank()) {
+            return;
+        }
+        final String assistantText = firstAssistantText();
+        Thread.startVirtualThread(() -> {
+            try {
+                String title = titleGenerator.generate(userText, assistantText);
+                if (title != null && !title.isBlank()) {
+                    SessionManager.saveTitle(workDir, sid, title);
+                    broadcastSessions(workDir);
+                }
+            } catch (Exception ignored) {
+                // 标题生成失败不影响主流程
+            }
+        });
+    }
+
+    /** 会话中第一段助手回复，作为生成标题的上下文。 */
+    private String firstAssistantText() {
+        if (conversation == null) {
+            return "";
+        }
+        for (var message : conversation.getMessages()) {
+            if ("assistant".equals(message.getRole())) {
+                String content = message.getContent();
+                if (content != null && !content.isBlank()) {
+                    return content;
+                }
+            }
+        }
+        return "";
+    }
+
+    /**
+     * `/retitle`：为缺少标题的历史会话补生成标题。
+     *
+     * <p>串行执行并限量（{@value #RETITLE_LIMIT}），每完成一个就推一条进度；
+     * 全部结束后广播一次会话列表，侧栏整体刷新。整个过程跑在虚拟线程里，
+     * 不阻塞 WebSocket 读循环。
+     */
+    private void handleRetitle() {
+        final String workDir = System.getProperty("user.dir");
+        if (titleGenerator == null) {
+            broadcast(Map.of("type", "system", "data", Map.of("message", "标题生成器未初始化")));
+            broadcast(Map.of("type", "command_done"));
+            return;
+        }
+        Thread.startVirtualThread(() -> {
+            try {
+                var missing = SessionManager.listSessions(workDir).stream()
+                        .filter(s -> s.title() == null || s.title().isBlank())
+                        .limit(RETITLE_LIMIT)
+                        .toList();
+                if (missing.isEmpty()) {
+                    broadcast(Map.of("type", "system", "data", Map.of("message", "所有会话都已有标题")));
+                    broadcast(Map.of("type", "command_done"));
+                    return;
+                }
+                broadcast(Map.of("type", "system", "data", Map.of("message",
+                        "开始为 %d 个历史会话生成标题…".formatted(missing.size()))));
+
+                int ok = 0;
+                int failed = 0;
+                for (int i = 0; i < missing.size(); i++) {
+                    var session = missing.get(i);
+                    String title = titleGenerator.generate(
+                            session.firstMessage(), lastAssistantText(workDir, session.id()));
+                    if (title == null || title.isBlank()) {
+                        failed++;
+                        continue;
+                    }
+                    SessionManager.saveTitle(workDir, session.id(), title);
+                    ok++;
+                    broadcast(Map.of("type", "system", "data", Map.of("message",
+                            "  %d/%d %s → %s".formatted(i + 1, missing.size(), session.id(), title))));
+                }
+
+                broadcastSessions(workDir);
+                broadcast(Map.of("type", "system", "data", Map.of("message",
+                        "标题生成完成：成功 %d，失败 %d".formatted(ok, failed))));
+                broadcast(Map.of("type", "command_done"));
+            } catch (Exception e) {
+                broadcast(Map.of("type", "system", "data",
+                        Map.of("message", "标题生成失败：" + e.getMessage())));
+                broadcast(Map.of("type", "command_done"));
+            }
+        });
+    }
+
+    /** 会话中最后一段助手文本，用于给历史会话补标题。 */
+    private String lastAssistantText(String workDir, String sessionId) {
+        String last = "";
+        for (var message : SessionManager.loadSession(workDir, sessionId)) {
+            if ("assistant".equals(message.role())
+                    && message.content() != null && !message.content().isBlank()) {
+                last = message.content();
+            }
+        }
+        return last;
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -516,6 +563,7 @@ public class RemoteServer {
             streaming = true;
             streamThread = Thread.currentThread();
             String workDir = System.getProperty("user.dir");
+            pendingUserPrompt = content;
             SessionManager.saveMessage(workDir, sessionId, "user", content);
             conversation.addUserMessage(content);
 
@@ -802,6 +850,10 @@ public class RemoteServer {
                         }
                         case "rewind" -> broadcast(Map.of("type", "system", "data",
                                 Map.of("message", "Rewind is not yet supported in remote mode.")));
+                        case "retitle" -> {
+                            handleRetitle();
+                            return; // retitle 自己管 command_done
+                        }
                     }
                     broadcast(Map.of("type", "command_done"));
                 }
@@ -1119,6 +1171,7 @@ public class RemoteServer {
                             "totalTurns", e.totalTurns(),
                             "elapsed", elapsed
                     )));
+                    maybeGenerateTitle();
                     return; // Agent 循环结束
                 }
                 case AgentEvent.UsageEvent e -> {

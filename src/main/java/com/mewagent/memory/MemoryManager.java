@@ -89,6 +89,29 @@ public class MemoryManager {
         return out;
     }
 
+    /**
+     * 把项目/用户级记忆渲染成可注入上下文的段落。
+     *
+     * <p>三个入口共用同一段文案，避免"某个模式忘了注入记忆"——远程模式之前就是这样漏掉的。
+     *
+     * @return 形如 {@code "# Auto Memory\n\n[type] name — desc\n\n"} 的文本；没有记忆时返回空串
+     */
+    public static String renderMemorySection(String workDir) {
+        try {
+            var memories = new MemoryManager(workDir).getMemories();
+            if (memories.isEmpty()) {
+                return "";
+            }
+            var sb = new StringBuilder("# Auto Memory\n\n");
+            for (String memory : memories) {
+                sb.append(memory).append("\n\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     public boolean shouldExtract() {
         turnCount++;
         return turnCount % EXTRACTION_INTERVAL == 0;

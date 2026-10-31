@@ -26,6 +26,14 @@ public class SessionManager {
     public static final String TYPE_COMPACT_BOUNDARY = "compact_boundary";
 
     /**
+     * TYPE_TITLE marks a record that stores the LLM-generated session title shown
+     * in the session list. Title records are skipped by {@link #loadSession}, so
+     * replay, message counting and history rendering are unaffected — a session
+     * without one simply falls back to its first user message.
+     */
+    public static final String TYPE_TITLE = "title";
+
+    /**
      * A session record. {@code type} distinguishes record kinds: empty/null (the
      * default) means a plain conversation message; {@link #TYPE_COMPACT_BOUNDARY}
      * means {@code content} is a {@link CompactBoundary} JSON blob written by
@@ -71,7 +79,8 @@ public class SessionManager {
     public record BoundaryScan(CompactBoundary boundary, List<SessionMessage> after, boolean found) {}
 
     public record SessionInfo(String id, String firstMessage, int messageCount,
-                              long fileSize, String gitBranch, Instant modTime) {}
+                              long fileSize, String gitBranch, Instant modTime,
+                              String title) {}
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -137,6 +146,68 @@ public class SessionManager {
         }
     }
 
+    /**
+     * Append a generated title record. Written as a regular JSONL record with
+     * {@code type=title} so the session file stays a single source of truth and
+     * deleting the session removes the title with it.
+     *
+     * <p>Appending again simply supersedes the previous title: {@link #readTitle}
+     * returns the most recent one.
+     */
+    public static void saveTitle(String workDir, String sessionId, String title) {
+        if (workDir == null || workDir.isBlank() || sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+        String clean = title == null ? "" : title.strip();
+        if (clean.isEmpty()) {
+            return;
+        }
+        saveRecord(workDir, sessionId, "system", TYPE_TITLE, clean, null);
+    }
+
+    /**
+     * Reads the most recent title record for a session.
+     *
+     * @return the title, or {@code null} when the session has none (old sessions,
+     *         generation still running, or generation failed) — callers fall back
+     *         to the first user message.
+     */
+    public static String readTitle(String workDir, String sessionId) {
+        if (workDir == null || sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        Path file = sessionsDir(workDir).resolve(sessionId + ".jsonl");
+        if (!Files.exists(file)) {
+            return null;
+        }
+        String title = null;
+        try (BufferedReader reader = Files.newBufferedReader(file)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // 廉价预筛，避免为每条普通消息做 JSON 解析
+                if (line.isBlank() || !line.contains(TYPE_TITLE)) {
+                    continue;
+                }
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = MAPPER.readValue(line, Map.class);
+                    if (!TYPE_TITLE.equals(map.get("type"))) {
+                        continue;
+                    }
+                    Object content = map.get("content");
+                    if (content instanceof String s && !s.isBlank()) {
+                        title = s;
+                    }
+                } catch (IOException ignored) {
+                    // skip malformed line
+                }
+            }
+        } catch (IOException ignored) {
+            // treat unreadable file as "no title"
+        }
+        return title;
+    }
+
     private static void saveRecord(String workDir, String sessionId,
                                    String role, String type, String content, String toolUseId) {
         try {
@@ -182,6 +253,10 @@ public class SessionManager {
                     long ts = map.get("ts") instanceof Number n ? n.longValue() : 0L;
                     // 读取 toolUseId，用于 resume 时的 chain validation
                     String toolUseId = (String) map.get("tool_use_id");
+                    // 标题记录不是对话内容：跳过，避免污染 replay / 消息计数 / 历史渲染
+                    if (TYPE_TITLE.equals(type)) {
+                        continue;
+                    }
                     if (content != null && !content.isEmpty()) {
                         messages.add(new SessionMessage(role, type, content, ts, toolUseId));
                     }
@@ -359,7 +434,7 @@ public class SessionManager {
                                  .findFirst()
                                  .orElse("");
                          sessions.add(new SessionInfo(id, first, msgs.size(),
-                                 fileSize, branch, modTime));
+                                 fileSize, branch, modTime, readTitle(workDir, id)));
                      } catch (IOException ignored) {
                          // skip this file
                      }
