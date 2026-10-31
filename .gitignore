@@ -25,3 +25,6 @@ AH_column.txt
 # 离线 Gradle 发行版：体积大不入库，只保留占位文件
 docker/gradle-dists/*
 !docker/gradle-dists/.gitkeep
+
+# Gradle wrapper 必须入库，否则 CI / 全新克隆无法执行 ./gradlew
+!gradle/wrapper/gradle-wrapper.jar
