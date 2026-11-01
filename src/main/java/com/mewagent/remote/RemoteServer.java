@@ -346,6 +346,13 @@ public class RemoteServer {
                         handleResume(targetId);
                     }
                 }
+                case "rename_session" -> {
+                    if (data instanceof Map<?, ?> d) {
+                        String targetId = (String) d.get("id");
+                        String newTitle = (String) d.get("title");
+                        handleRenameSession(targetId, newTitle);
+                    }
+                }
                 case "new_session" -> {
                     String wd = System.getProperty("user.dir");
                     // 新 session ID
@@ -402,6 +409,32 @@ public class RemoteServer {
         } catch (Exception e) {
             System.err.println("WebSocket message parse error: " + e.getMessage());
         }
+    }
+
+    /**
+     * 重命名会话：追加一条新的 title 记录（后写覆盖先写），然后刷新侧栏。
+     *
+     * <p>校验：会话 id 只允许字母数字与 {@code -_.}，且不含 {@code ..}；标题去空白后
+     * 长度 1..60。重命名过的会话不会再被自动标题覆盖，因为
+     * {@link #maybeGenerateTitle()} 发现已有 title 就直接跳过。
+     */
+    private void handleRenameSession(String targetId, String newTitle) {
+        if (targetId == null || targetId.isBlank() || newTitle == null) {
+            return;
+        }
+        if (!targetId.matches("[A-Za-z0-9._-]+") || targetId.contains("..")) {
+            return;
+        }
+        String title = newTitle.strip();
+        if (title.isEmpty()) {
+            return;
+        }
+        if (title.length() > 60) {
+            title = title.substring(0, 60);
+        }
+        String workDir = System.getProperty("user.dir");
+        SessionManager.saveTitle(workDir, targetId, title);
+        broadcastSessions(workDir);
     }
 
     /** 广播会话列表快照（list/new/delete 三处复用）。 */
