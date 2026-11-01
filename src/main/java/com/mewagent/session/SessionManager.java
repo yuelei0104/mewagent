@@ -379,33 +379,95 @@ public class SessionManager {
             return false;
         }
         try {
-            return Files.deleteIfExists(file);
+            boolean deleted = Files.deleteIfExists(file);
+            if (deleted) {
+                deleteUploadsFor(workDir, sessionId);
+            }
+            return deleted;
         } catch (IOException e) {
             return false;
         }
     }
 
     public static void cleanExpiredSessions(String workDir) {
+        long cutoffMs = System.currentTimeMillis() - EXPIRY_DAYS * 24 * 60 * 60 * 1000L;
+
         Path baseDir = sessionsDir(workDir);
-        if (!Files.isDirectory(baseDir)) {
+        if (Files.isDirectory(baseDir)) {
+            try (Stream<Path> paths = Files.list(baseDir)) {
+                paths.filter(p -> p.toString().endsWith(".jsonl"))
+                     .filter(Files::isRegularFile)
+                     .forEach(p -> {
+                         try {
+                             long mtime = Files.getLastModifiedTime(p).toMillis();
+                             if (mtime < cutoffMs) {
+                                 Files.deleteIfExists(p);
+                             }
+                         } catch (IOException ignored) {
+                             // 单个文件清理失败不影响其它
+                         }
+                     });
+            } catch (IOException ignored) {
+                // 目录不可读时静默忽略
+            }
+        }
+
+        cleanOrphanUploads(workDir, cutoffMs);
+    }
+
+    /**
+     * 清理没有对应会话文件的上传目录。
+     *
+     * <p>上传目录以 sessionId 命名，删会话时会一并删除；这里兜底处理"会话已过期、
+     * 上传目录却还在"的孤儿，以及历史遗留的目录。要求目录超过 {@value #EXPIRY_DAYS}
+     * 天未修改，避免误删正在进行中的会话。
+     */
+    private static void cleanOrphanUploads(String workDir, long cutoffMs) {
+        Path uploadsDir = Path.of(workDir, ".mewagent", "uploads");
+        if (!Files.isDirectory(uploadsDir)) {
             return;
         }
-        long cutoffMs = System.currentTimeMillis() - EXPIRY_DAYS * 24 * 60 * 60 * 1000L;
-        try (Stream<Path> paths = Files.list(baseDir)) {
-            paths.filter(p -> p.toString().endsWith(".jsonl"))
-                 .filter(Files::isRegularFile)
-                 .forEach(p -> {
-                     try {
-                         long mtime = Files.getLastModifiedTime(p).toMillis();
-                         if (mtime < cutoffMs) {
-                             Files.deleteIfExists(p);
-                         }
-                     } catch (IOException ignored) {
-                         // 单个文件清理失败不影响其它
-                     }
-                 });
+        try (Stream<Path> dirs = Files.list(uploadsDir)) {
+            dirs.filter(Files::isDirectory).forEach(dir -> {
+                String id = dir.getFileName().toString();
+                if (Files.exists(sessionsDir(workDir).resolve(id + ".jsonl"))) {
+                    return; // 会话还在，保留
+                }
+                try {
+                    if (Files.getLastModifiedTime(dir).toMillis() >= cutoffMs) {
+                        return; // 还没过期
+                    }
+                    deleteRecursively(dir);
+                } catch (IOException ignored) {
+                    // 单个目录失败不影响其它
+                }
+            });
         } catch (IOException ignored) {
             // 目录不可读时静默忽略
+        }
+    }
+
+    /** 删除会话时一并清掉它的上传目录。 */
+    private static void deleteUploadsFor(String workDir, String sessionId) {
+        Path uploadsRoot = Path.of(workDir, ".mewagent", "uploads").normalize();
+        Path dir = uploadsRoot.resolve(sessionId).normalize();
+        if (!dir.startsWith(uploadsRoot) || !Files.isDirectory(dir)) {
+            return;
+        }
+        deleteRecursively(dir);
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (Stream<Path> paths = Files.walk(dir)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                    // best-effort
+                }
+            });
+        } catch (IOException ignored) {
+            // best-effort
         }
     }
 

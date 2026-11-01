@@ -57,6 +57,9 @@ eval/
 
 ## 现有用例
 
+20 个用例，覆盖单文件修复、跨文件重命名、跨文件方法抽取、边界条件、异常契约、状态机、
+区间合并、回归保护（`019` 带基线测试）以及两个反向用例（`004` 只读问答、`006` 最小改动）。
+
 | id | 考察点 |
 |---|---|
 | 001-fix-off-by-one | 定位并修复越界，含边界与空输入 |
@@ -65,9 +68,28 @@ eval/
 | 004-read-only-question | **反向用例**：纯问答不得改动任何文件 |
 | 005-respect-conventions | 按 `MEWAGENT.md` 的项目规范新增方法（验证指令注入是否真的生效） |
 | 006-minimal-edit | 只改一处拼写，整份文件必须逐字节等于期望 |
+| 007-empty-average | 空集合/null 求平均不得抛异常 |
+| 008-kv-parse | 键值串解析的边界：尾部分号、空值、空白 |
+| 009-rename-accessor | 跨三个文件重命名访问器，且旧方法必须消失 |
+| 010-search-bounds | 二分查找的未命中与空数组 |
+| 011-state-machine | 状态机不允许非法回退 |
+| 012-dedupe-order | 去重必须保持首次出现顺序 |
+| 013-exception-contract | 非法输入抛 IllegalArgumentException 且消息符合约定 |
+| 014-extract-formatter | 把格式化逻辑抽到新类并删掉旧方法 |
+| 015-config-default | 缺失或空白的配置回退默认值 |
+| 016-page-beyond-end | 超出范围的页码返回空列表 |
+| 017-merge-adjacent | 相邻区间也要合并 |
+| 018-countdown-inclusive | 倒计时必须包含 0 |
+| 019-clamp-regression | **回归保护**：修下界时不能破坏上界（附 BaselineTest） |
+| 020-banner-version | 最小改动：只改版本号 |
 
 004 和 006 是最容易被忽略但最能体现质量的两条：多数 Agent 的问题不是"做不对"，
 而是"做多了"。
+
+## 超时
+
+评测会把子进程的 `MEWAGENT_STREAM_TIMEOUT_SEC` 设为 180。默认 30 秒对评测太紧：
+模型首个 token 偶发超过 30 秒，会被记成 `agent_error`，看起来像 Agent 失败。
 
 ## 加用例
 

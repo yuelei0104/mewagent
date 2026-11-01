@@ -159,6 +159,14 @@ public class RemoteServer {
         // 连接 MCP 服务器
         initMcpServers();
 
+        // 启动时清理过期会话与孤儿上传目录（远程模式以前完全没执行过清理）
+        SessionManager.cleanExpiredSessions(System.getProperty("user.dir"));
+
+        if (taskToken.isBlank() && !addr.startsWith(":")) {
+            System.err.println("[mewagent] WARNING: --remote is bound to a non-local address without "
+                    + "MEWAGENT_TASK_TOKEN; anyone who can reach this port can drive the agent.");
+        }
+
         // 解析监听地址（格式 ":18888" 或 "0.0.0.0:18888"）
         int port = parsePort(addr);
 
@@ -178,6 +186,11 @@ public class RemoteServer {
                 .get("/tasks", this::handleListTasks)
                 .ws("/ws", ws -> {
                     ws.onConnect(ctx -> {
+                        if (!authorizedWs(ctx)) {
+                            // 令牌缺失或不匹配：直接关连接，不加入广播池
+                            ctx.closeSession(1008, "unauthorized");
+                            return;
+                        }
                         connections.add(ctx);
                         // 新连接推送 session 信息
                         broadcast(Map.of(
@@ -876,6 +889,19 @@ public class RemoteServer {
         byte[] provided = header.substring("Bearer ".length()).getBytes(StandardCharsets.UTF_8);
         byte[] expected = taskToken.getBytes(StandardCharsets.UTF_8);
         return MessageDigest.isEqual(provided, expected);
+    }
+
+    /**
+     * WebSocket 鉴权：浏览器的 WebSocket 不能自定义 header，所以令牌走查询参数
+     * {@code ?token=}。未配置 {@code MEWAGENT_TASK_TOKEN} 时放行（仅限本地使用）。
+     */
+    private boolean authorizedWs(WsContext ctx) {
+        if (taskToken.isBlank()) return true;
+        String provided = ctx.queryParam("token");
+        if (provided == null || provided.isEmpty()) return false;
+        return MessageDigest.isEqual(
+                provided.getBytes(StandardCharsets.UTF_8),
+                taskToken.getBytes(StandardCharsets.UTF_8));
     }
 
     /** 任务表满额时淘汰最旧的已完成任务，保留运行中的记录。 */

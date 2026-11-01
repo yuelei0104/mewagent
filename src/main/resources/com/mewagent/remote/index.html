@@ -1058,11 +1058,22 @@ function sessionTitle(s){
 }
 
 // ─── WebSocket ───
+const TOKEN_KEY='mewagent-token';
+// 令牌来源：URL ?token= 优先（方便一次性链接），否则用 localStorage 里存的
+function authToken(){
+  const fromUrl=new URLSearchParams(location.search).get('token');
+  if(fromUrl){
+    try{localStorage.setItem(TOKEN_KEY,fromUrl)}catch(e){}
+    return fromUrl;
+  }
+  try{return localStorage.getItem(TOKEN_KEY)||''}catch(e){return ''}
+}
 function connect(){
   if(pingTimer){clearInterval(pingTimer);pingTimer=null}
   if(ws){try{ws.onclose=null;ws.close()}catch(e){}ws=null}
   const proto=location.protocol==='https:'?'wss:':'ws:';
-  ws=new WebSocket(proto+'//'+location.host+'/ws');
+  const token=authToken();
+  ws=new WebSocket(proto+'//'+location.host+'/ws'+(token?'?token='+encodeURIComponent(token):''));
   ws.onopen=()=>{
     connStatus.innerHTML='<span class="dot connected"></span>已连接';
     connStatus.classList.remove('can-retry');
@@ -1071,13 +1082,27 @@ function connect(){
     pingTimer=setInterval(()=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'ping',data:{}}))},10000);
     ws.send(JSON.stringify({type:'list_sessions',data:{}}));
   };
-  ws.onclose=()=>{
+  ws.onclose=(evt)=>{
+    if(pingTimer){clearInterval(pingTimer);pingTimer=null}
+    // 1008 = 服务端拒绝（令牌缺失或不匹配），不自动重连，改为让用户输入
+    if(evt&&evt.code===1008){
+      connStatus.innerHTML='<span class="dot disconnected"></span>需要访问令牌';
+      connStatus.classList.add('can-retry');
+      connStatus.title='点击输入令牌';
+      connStatus.onclick=()=>{
+        const t=window.prompt('请输入访问令牌（服务端 MEWAGENT_TASK_TOKEN）');
+        if(t&&t.trim()){
+          try{localStorage.setItem(TOKEN_KEY,t.trim())}catch(e){}
+          connect();
+        }
+      };
+      return;
+    }
     connStatus.innerHTML='<span class="dot disconnected"></span>重连中…';
     // 自动重连之外，再给一个手动入口：等太久或网络恢复时不用干等
     connStatus.classList.add('can-retry');
     connStatus.title='点击立即重连';
     connStatus.onclick=()=>connect();
-    if(pingTimer){clearInterval(pingTimer);pingTimer=null}
     setTimeout(connect,3000);
   };
   ws.onerror=()=>{};

@@ -232,6 +232,10 @@ curl -X POST http://127.0.0.1:18888/task \
 **鉴权**：设置 `MEWAGENT_TASK_TOKEN` 后，三个接口都要求
 `Authorization: Bearer <token>`（常量时间比较）。未设置时不鉴权，仅限本地使用。
 
+**同一令牌也保护 WebSocket**：页面连接 `/ws` 时会带上 `?token=`，缺失或不匹配会被
+服务端以 1008 关闭，界面提示"需要访问令牌"。首次可以用
+`http://host:18888/?token=<token>` 打开一次，令牌会存在浏览器 localStorage 里。
+
 **权限**：REST 任务无人值守，没有界面可弹窗，工具权限请求一律自动放行
 （单次批准，不写入 allow-always 规则）。请配合沙箱或容器隔离使用，
 不要把该接口暴露到不受信任的网络。
