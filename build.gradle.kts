@@ -1,6 +1,7 @@
 plugins {
     java
     application
+    jacoco
     id("com.gradleup.shadow") version "8.3.6"
 }
 
@@ -51,6 +52,15 @@ tasks.withType<JavaCompile> {
 
 tasks.test {
     useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
 }
 
 tasks.shadowJar {

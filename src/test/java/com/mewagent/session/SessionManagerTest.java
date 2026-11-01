@@ -303,4 +303,20 @@ class SessionManagerTest {
         assertNull(SessionTitleGenerator.sanitize("   \n  "));
         assertNull(SessionTitleGenerator.sanitize(null));
     }
-}
+
+    @Test
+    void deleteSessionAlsoRemovesUploadsDir(@TempDir Path dir) throws java.io.IOException {
+        String workDir = dir.toString();
+        String sessionId = "20260101-160000";
+
+        SessionManager.saveMessage(workDir, sessionId, "user", "hi");
+        java.nio.file.Path uploads = dir.resolve(".mewagent/uploads/" + sessionId);
+        java.nio.file.Files.createDirectories(uploads);
+        java.nio.file.Files.writeString(uploads.resolve("note.txt"), "x");
+        assertTrue(java.nio.file.Files.exists(uploads));
+
+        assertTrue(SessionManager.deleteSession(workDir, sessionId));
+
+        assertFalse(java.nio.file.Files.exists(uploads), "uploads dir must go with the session");
+        assertTrue(SessionManager.loadSession(workDir, sessionId).isEmpty());
+    }}
