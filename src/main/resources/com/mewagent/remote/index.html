@@ -267,6 +267,15 @@ button{font-family:inherit}
 .theme-btn:hover{color:var(--text-bright)}
 .theme-btn.active{background:var(--surface-3);color:var(--text-bright)}
 
+.icon-btn{
+  width:26px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);border-radius:7px;background:var(--surface);
+  color:var(--text-dim);cursor:pointer;
+  transition:background .14s ease,color .14s ease,border-color .14s ease;
+}
+.icon-btn svg{width:13px;height:13px}
+.icon-btn:hover{color:var(--text-bright);border-color:var(--accent-line)}
+
 /* ═══ 消息区 ═══ */
 #messages{
   flex:1;overflow-y:auto;overscroll-behavior:contain;
@@ -674,6 +683,102 @@ button{font-family:inherit}
   border:3px solid transparent;background-clip:content-box;
 }
 
+/* ═══ 会话搜索 ═══ */
+.session-search{position:relative;padding:0 12px 8px;flex-shrink:0}
+.session-search input{
+  width:100%;height:30px;padding:0 10px 0 30px;border-radius:8px;
+  border:1px solid var(--border);background:var(--surface);color:var(--text);
+  font-family:inherit;font-size:12.5px;outline:none;
+  transition:border-color .15s ease,background .15s ease;
+}
+.session-search input::placeholder{color:var(--text-dim)}
+.session-search input:focus{border-color:var(--accent-line);background:var(--surface-2)}
+.session-search .search-icon{
+  position:absolute;left:22px;top:calc(50% - 4px);transform:translateY(-50%);
+  display:flex;color:var(--text-dim);pointer-events:none;
+}
+.session-search .search-icon svg{width:13px;height:13px}
+.session-group{
+  padding:10px 10px 4px;font-size:10.5px;font-weight:600;
+  letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;
+}
+
+/* ═══ 骨架屏 ═══ */
+.skeleton{padding:9px 11px;margin-bottom:2px}
+.skeleton .line{
+  height:9px;border-radius:5px;margin-bottom:7px;
+  background:linear-gradient(90deg,var(--surface) 25%,var(--surface-3) 37%,var(--surface) 63%);
+  background-size:400% 100%;
+  animation:shimmer 1.4s ease infinite;
+}
+.skeleton .line.short{width:55%;height:8px;margin-bottom:0}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+
+/* ═══ 设置面板 ═══ */
+#settings-modal{
+  display:none;position:fixed;inset:0;z-index:50;
+  align-items:center;justify-content:center;
+  background:rgba(0,0,0,.45);
+}
+#settings-modal.show{display:flex}
+.settings-card{
+  width:min(440px,calc(100vw - 32px));max-height:80vh;overflow:auto;
+  background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;
+  box-shadow:var(--shadow-3);
+  animation:fadeUp .18s ease both;
+}
+.settings-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px;border-bottom:1px solid var(--border);
+}
+.settings-head h3{font-size:15px;font-weight:600;color:var(--text-bright)}
+.settings-close{
+  border:none;background:transparent;color:var(--text-dim);
+  cursor:pointer;font-size:15px;line-height:1;padding:5px 7px;border-radius:6px;
+}
+.settings-close:hover{background:var(--surface-2);color:var(--text-bright)}
+.settings-body{padding:12px 18px 18px}
+.settings-row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:9px 0;border-bottom:1px solid var(--border);
+}
+.settings-row:last-of-type{border-bottom:none}
+.settings-label{font-size:13px;color:var(--text);white-space:nowrap}
+.settings-value{
+  font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);
+  text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:62%;
+}
+.settings-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:14px}
+.settings-actions button{
+  height:30px;padding:0 12px;border-radius:8px;
+  border:1px solid var(--border-strong);background:transparent;color:var(--text);
+  font-size:12.5px;cursor:pointer;
+  transition:background .14s ease,border-color .14s ease;
+}
+.settings-actions button:hover{background:var(--surface-2);border-color:var(--accent-line)}
+
+/* ═══ 错误重试 ═══ */
+.msg-error{display:flex;align-items:flex-start;gap:10px}
+.msg-error .err-text{flex:1}
+.msg-error .retry-btn{
+  flex-shrink:0;height:24px;padding:0 10px;border-radius:6px;
+  border:1px solid rgba(255,107,122,.35);background:transparent;
+  color:var(--red);font-size:11.5px;cursor:pointer;
+}
+.msg-error .retry-btn:hover{background:rgba(255,107,122,.12)}
+
+/* ═══ 断线可点重连 ═══ */
+#conn-status.can-retry{cursor:pointer}
+#conn-status.can-retry:hover{color:var(--text-bright)}
+
+/* ═══ 键盘焦点 ═══ */
+button:focus-visible,input:focus-visible,textarea:focus-visible,.session-item:focus-visible{
+  outline:2px solid var(--accent-line);outline-offset:2px;
+}
+
+/* ═══ 长列表渲染优化 ═══ */
+.msg{content-visibility:auto;contain-intrinsic-size:auto 80px}
+
 /* ═══ 响应式 ═══ */
 @media (max-width:960px){
   .sidebar{display:none}
@@ -710,9 +815,23 @@ button{font-family:inherit}
         <span class="plus">+</span><span>新建</span>
       </button>
     </div>
+    <div class="session-search">
+      <span class="search-icon">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.2" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
+      <input id="session-search" type="search" placeholder="搜索会话…" aria-label="搜索会话" autocomplete="off">
+    </div>
     <div class="session-count" id="session-count"></div>
-    <div id="session-list">
-      <div class="session-empty">Loading...</div>
+    <div id="session-list" role="list" aria-label="会话列表">
+      <div class="skeleton" aria-hidden="true">
+        <div class="line"></div><div class="line short"></div>
+      </div>
+      <div class="skeleton" aria-hidden="true">
+        <div class="line"></div><div class="line short"></div>
+      </div>
+      <div class="skeleton" aria-hidden="true">
+        <div class="line"></div><div class="line short"></div>
+      </div>
     </div>
   </div>
 
@@ -733,6 +852,9 @@ button{font-family:inherit}
           <span class="usage-sep"></span>
           <span class="usage-item"><span class="usage-k">输出</span><span class="usage-v" id="usage-out">0</span></span>
         </span>
+        <button id="settings-btn" class="icon-btn" title="设置" aria-label="打开设置">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.7 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.7a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.7a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.3 9c.26.62.87 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.97Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        </button>
         <div class="theme-toggle compact">
           <button class="theme-btn active" data-theme-val="dark" onclick="setTheme('dark')" title="深色" aria-label="深色主题">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
@@ -776,6 +898,17 @@ button{font-family:inherit}
   <!-- 右栏已移除：命令改由输入框内的斜杠菜单承载，主题切换收进顶部状态栏 -->
 </div>
 
+<!-- ═══ 设置面板 ═══ -->
+<div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="settings-card">
+    <div class="settings-head">
+      <h3 id="settings-title">设置</h3>
+      <button class="settings-close" onclick="closeSettings()" aria-label="关闭设置">✕</button>
+    </div>
+    <div class="settings-body" id="settings-body"></div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 // ─── DOM refs ───
@@ -790,12 +923,17 @@ const sessionLabel = document.getElementById('session-label');
 const historyPanel = document.getElementById('history-panel');
 const historyBody = document.getElementById('history-body');
 const historyTitle = document.getElementById('history-title');
+const searchInput = document.getElementById('session-search');
+const settingsModal = document.getElementById('settings-modal');
+const settingsBody = document.getElementById('settings-body');
 
 // ─── State ───
 let ws = null, streaming = false, allCommands = [], slashCursor = 0, slashFiltered = [];
 let currentAssistantEl = null, currentStreamText = '', currentThinkingEl = null, currentThinkingText = '';
 let autoScroll = true, pingTimer = null, connectedOnce = false;
 let allSessions = [], currentSessionId = null;
+let sessionQuery = '', sessionLoading = true, lastPrompt = '';
+let currentCwd = '';
 
 // ─── Theme ───
 function setTheme(theme) {
@@ -855,11 +993,18 @@ function connect(){
   ws=new WebSocket(proto+'//'+location.host+'/ws');
   ws.onopen=()=>{
     connStatus.innerHTML='<span class="dot connected"></span>已连接';
+    connStatus.classList.remove('can-retry');
+    connStatus.onclick=null;
+    connStatus.title='';
     pingTimer=setInterval(()=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'ping',data:{}}))},10000);
     ws.send(JSON.stringify({type:'list_sessions',data:{}}));
   };
   ws.onclose=()=>{
     connStatus.innerHTML='<span class="dot disconnected"></span>重连中…';
+    // 自动重连之外，再给一个手动入口：等太久或网络恢复时不用干等
+    connStatus.classList.add('can-retry');
+    connStatus.title='点击立即重连';
+    connStatus.onclick=()=>connect();
     if(pingTimer){clearInterval(pingTimer);pingTimer=null}
     setTimeout(connect,3000);
   };
@@ -875,12 +1020,14 @@ function handleMessage(msg){
       currentSessionId=msg.data.session;
       sessionLabel.textContent='会话 · '+formatSessionLabel(msg.data.session);
       sessionLabel.title=msg.data.session+'  ·  '+msg.data.cwd;
+      currentCwd=msg.data.cwd||'';
       if(isNewSession)resetUsage();
       if(!connectedOnce){showWelcome();connectedOnce=true}
       break;
     }
     case 'sessions':
       allSessions=msg.data||[];
+      sessionLoading=false;
       renderSessions();
       break;
     case 'commands':
@@ -934,27 +1081,72 @@ function handleMessage(msg){
   }
 }
 
-// ─── Session List (IDs only) ───
-function renderSessions(){
-  sessionCount.textContent=allSessions.length+' 个会话';
-  if(allSessions.length===0){
-    sessionList.innerHTML='<div class="session-empty">还没有会话<br>在右侧描述一个任务即可开始</div>';return;
+// ─── Session List ───
+function skeletonMarkup(n){
+  let html='';
+  for(let i=0;i<n;i++){
+    html+='<div class="skeleton" aria-hidden="true"><div class="line"></div><div class="line short"></div></div>';
   }
-  sessionList.innerHTML=allSessions.map(s=>{
+  return html;
+}
+
+// 按服务端返回的英文相对时间分桶（在 relTime 转换之前用原始值判断）
+function sessionBucket(relativeTime){
+  const t=String(relativeTime||'');
+  if(t.includes('just now')||t.includes('minute')||t.includes('hour'))return '今天';
+  if(t.includes('1 day'))return '昨天';
+  if(t.includes('day'))return '最近一周';
+  return '更早';
+}
+
+function renderSessions(){
+  const query=sessionQuery.trim().toLowerCase();
+  const total=allSessions.length;
+  const list=query
+    ? allSessions.filter(s=>((s.title||'')+' '+(s.firstMessage||'')+' '+s.id).toLowerCase().includes(query))
+    : allSessions;
+
+  sessionCount.textContent=query
+    ? '匹配 '+list.length+' / '+total+' 个会话'
+    : total+' 个会话';
+
+  if(sessionLoading){
+    sessionList.innerHTML=skeletonMarkup(3);
+    return;
+  }
+  if(total===0){
+    sessionList.innerHTML='<div class="session-empty">还没有会话<br>在右侧描述一个任务即可开始</div>';
+    return;
+  }
+  if(list.length===0){
+    sessionList.innerHTML='<div class="session-empty">没有匹配「'+escapeHtml(sessionQuery)+'」的会话</div>';
+    return;
+  }
+
+  let html='';
+  let bucket='';
+  list.forEach(s=>{
+    const b=sessionBucket(s.relativeTime);
+    if(b!==bucket){
+      bucket=b;
+      html+='<div class="session-group">'+b+'</div>';
+    }
     const active=s.id===currentSessionId?'active':'';
     const title=sessionTitle(s);
     const parts=[];
     if(s.relativeTime)parts.push(relTime(s.relativeTime));
     if(s.messageCount)parts.push(s.messageCount+' 条消息');
     const meta=parts.join(' · ');
-    return '<div class="session-item '+active+'" title="'+escapeHtml(s.id)+'" onclick="viewSession(\''+s.id+'\')">'
+    html+='<div class="session-item '+active+'" role="listitem" tabindex="0" title="'+escapeHtml(s.id)+'"'
+      +' onclick="viewSession(\''+s.id+'\')" onkeydown="if(event.key===\'Enter\')viewSession(\''+s.id+'\')">'
       +'<div class="session-main">'
         +'<div class="session-title">'+escapeHtml(title)+'</div>'
         +'<div class="session-meta">'+escapeHtml(meta)+'</div>'
       +'</div>'
-      +'<button class="session-del" title="删除会话" onclick="event.stopPropagation();askDelete(\''+s.id+'\',this)">×</button>'
+      +'<button class="session-del" title="删除会话" aria-label="删除会话" onclick="event.stopPropagation();askDelete(\''+s.id+'\',this)">×</button>'
       +'</div>';
-  }).join('');
+  });
+  sessionList.innerHTML=html;
 }
 
 // 删除会话：第一次点击进入待确认态，3 秒内再点一次才真正删除
@@ -1081,7 +1273,25 @@ function clearWelcome(){const w=messagesEl.querySelector('.welcome');if(w)w.remo
 function useTip(i){inputEl.value=WELCOME_TIPS[i];inputEl.focus()}
 
 function addSystem(t){clearWelcome();const d=document.createElement('div');d.className='msg msg-system';d.textContent=t;messagesEl.appendChild(d);scrollToBottom()}
-function addError(t){clearWelcome();const d=document.createElement('div');d.className='msg msg-error';d.textContent='✖ '+t;messagesEl.appendChild(d);scrollToBottom()}
+function addError(t){
+  clearWelcome();
+  const d=document.createElement('div');
+  d.className='msg msg-error';
+  const text=document.createElement('div');
+  text.className='err-text';
+  text.textContent='✖ '+t;
+  d.appendChild(text);
+  if(lastPrompt){
+    const btn=document.createElement('button');
+    btn.className='retry-btn';
+    btn.textContent='重试';
+    btn.title='重新发送上一条消息';
+    btn.onclick=()=>{d.remove();runCommand(lastPrompt);};
+    d.appendChild(btn);
+  }
+  messagesEl.appendChild(d);
+  scrollToBottom();
+}
 
 // ─── Tool blocks ───
 const toolElements={};
@@ -1160,11 +1370,27 @@ function respondAsk(id,qCount){
 }
 
 // ─── Scroll ───
+const MAX_MESSAGE_NODES=400;
+// 长会话兜底：DOM 节点超过上限就丢掉最老的（欢迎页除外），避免滚动越来越卡
+function trimMessages(){
+  while(messagesEl.children.length>MAX_MESSAGE_NODES){
+    const first=messagesEl.firstElementChild;
+    if(!first||first.classList.contains('welcome'))break;
+    first.remove();
+  }
+}
 messagesEl.addEventListener('scroll',()=>{const{scrollTop,scrollHeight,clientHeight}=messagesEl;autoScroll=scrollHeight-scrollTop-clientHeight<60});
-function scrollToBottom(){if(autoScroll)requestAnimationFrame(()=>{messagesEl.scrollTop=messagesEl.scrollHeight})}
+function scrollToBottom(){trimMessages();if(autoScroll)requestAnimationFrame(()=>{messagesEl.scrollTop=messagesEl.scrollHeight})}
 
 // ─── Input ───
-function runCommand(text){if(!text||streaming)return;addUser(text);ws.send(JSON.stringify({type:'user_message',data:{content:text}}));inputEl.value='';inputEl.style.height='auto';streaming=true;updateUI()}
+function runCommand(text){
+  if(!text||streaming)return;
+  // 只记住普通消息，斜杠命令不参与「重试上一条」
+  if(!text.startsWith('/'))lastPrompt=text;
+  addUser(text);
+  ws.send(JSON.stringify({type:'user_message',data:{content:text}}));
+  inputEl.value='';inputEl.style.height='auto';streaming=true;updateUI();
+}
 function sendMessage(){if(slashMenu.classList.contains('show'))hideSlashMenu();runCommand(inputEl.value.trim())}
 function updateUI(){sendBtn.disabled=streaming;inputEl.disabled=streaming;if(!streaming)inputEl.focus()}
 
@@ -1198,6 +1424,64 @@ sendBtn.addEventListener('click',sendMessage);
 
 // ─── New session ───
 function newSession(){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'new_session'}))}
+
+// ─── 设置面板 ───
+function openSettings(){renderSettings();settingsModal.classList.add('show');}
+function closeSettings(){settingsModal.classList.remove('show');}
+function renderSettings(){
+  if(!settingsBody)return;
+  const theme=document.documentElement.getAttribute('data-theme')||'dark';
+  const rows=[
+    ['会话', currentSessionId||'—'],
+    ['工作目录', currentCwd||'—'],
+    ['主题', theme==='light'?'浅色':'深色'],
+    ['累计 token', document.getElementById('usage-in').textContent+' / '+document.getElementById('usage-out').textContent]
+  ];
+  let html='';
+  rows.forEach(([k,v])=>{
+    html+='<div class="settings-row"><span class="settings-label">'+k+'</span>'
+      +'<span class="settings-value" title="'+escapeHtml(String(v))+'">'+escapeHtml(String(v))+'</span></div>';
+  });
+  html+='<div class="settings-actions">'
+    +'<button onclick="runSettingsCmd(\'/compact\')">压缩上下文</button>'
+    +'<button onclick="runSettingsCmd(\'/status\')">查看状态</button>'
+    +'<button onclick="runSettingsCmd(\'/retitle\')">回填会话标题</button>'
+    +'<button onclick="toggleTheme()">切换主题</button>'
+    +'</div>'
+    +'<div class="settings-actions">'
+    +'<button onclick="copySessionId()">复制会话 ID</button>'
+    +'<button onclick="closeSettings()">关闭</button>'
+    +'</div>';
+  settingsBody.innerHTML=html;
+}
+function runSettingsCmd(cmd){closeSettings();runCommand(cmd);}
+function toggleTheme(){
+  const next=document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';
+  setTheme(next);renderSettings();
+}
+function copySessionId(){
+  if(!currentSessionId)return;
+  if(navigator.clipboard)navigator.clipboard.writeText(currentSessionId);
+  closeSettings();
+}
+
+// 点遮罩关闭设置
+settingsModal.addEventListener('click',e=>{if(e.target===settingsModal)closeSettings();});
+
+// Esc 依次关闭：设置 → 历史 → 斜杠菜单
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  if(settingsModal.classList.contains('show')){closeSettings();return;}
+  if(historyPanel.classList.contains('show')){closeHistory();return;}
+  if(slashMenu.classList.contains('show')){hideSlashMenu();}
+});
+
+// 会话搜索
+searchInput.addEventListener('input',()=>{sessionQuery=searchInput.value;renderSessions();});
+searchInput.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){searchInput.value='';sessionQuery='';renderSessions();searchInput.blur();}
+});
+document.getElementById('settings-btn').addEventListener('click',openSettings);
 
 // ─── Start ───
 connect();inputEl.focus();
