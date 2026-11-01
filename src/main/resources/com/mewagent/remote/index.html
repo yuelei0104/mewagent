@@ -817,6 +817,31 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,.session-item:fo
 /* ═══ 长列表渲染优化 ═══ */
 .msg{content-visibility:auto;contain-intrinsic-size:auto 80px}
 
+/* ═══ 附件 ═══ */
+.attachment-bar{display:none;gap:6px;flex-wrap:wrap;padding:0 2px 8px}
+.attachment-bar.show{display:flex}
+.attachment-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  height:26px;padding:0 4px 0 10px;border-radius:7px;
+  border:1px solid var(--border);background:var(--surface);
+  font-size:11.5px;color:var(--text);
+}
+.att-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-size{color:var(--text-dim);font-family:var(--font-mono);font-size:10.5px}
+.att-remove{
+  border:none;background:transparent;color:var(--text-dim);cursor:pointer;
+  font-size:13px;line-height:1;padding:3px 5px;border-radius:4px;
+}
+.att-remove:hover{background:rgba(255,107,122,.14);color:var(--red)}
+#center.drag-over::after{
+  content:'松开即可上传';
+  position:absolute;inset:12px;z-index:40;
+  display:flex;align-items:center;justify-content:center;
+  border:2px dashed var(--accent-line);border-radius:16px;
+  background:var(--accent-soft);color:var(--text-bright);
+  font-size:14px;pointer-events:none;
+}
+
 /* ═══ 响应式 ═══ */
 @media (max-width:960px){
   .sidebar{display:none}
@@ -917,9 +942,14 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,.session-item:fo
     <div id="messages"></div>
     <div id="input-area" style="position:relative;">
       <div id="slash-menu"></div>
+      <div id="attachment-bar" class="attachment-bar" aria-live="polite"></div>
+      <input id="file-input" type="file" multiple hidden>
       <div class="composer">
         <textarea id="input" placeholder="描述一个任务，或按 / 查看命令…" rows="1"></textarea>
         <div class="composer-bar">
+          <button type="button" class="slash-btn" onclick="pickFile()" title="上传文件（也可直接拖进来）" aria-label="上传文件">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" style="width:13px;height:13px"><path d="M20 11.5 12.3 19a4.5 4.5 0 0 1-6.4-6.4l8-8a3 3 0 0 1 4.3 4.3l-8 8a1.5 1.5 0 0 1-2.1-2.1l7.4-7.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <button type="button" class="slash-btn" onclick="openCmdMenu()" title="查看可用命令">
             <span class="slash-icon">/</span><span>命令</span>
           </button>
@@ -964,6 +994,9 @@ const historyTitle = document.getElementById('history-title');
 const searchInput = document.getElementById('session-search');
 const settingsModal = document.getElementById('settings-modal');
 const settingsBody = document.getElementById('settings-body');
+const fileInput = document.getElementById('file-input');
+const attachmentBar = document.getElementById('attachment-bar');
+const centerEl = document.getElementById('center');
 
 // ─── State ───
 let ws = null, streaming = false, allCommands = [], slashCursor = 0, slashFiltered = [];
@@ -972,6 +1005,7 @@ let autoScroll = true, pingTimer = null, connectedOnce = false;
 let allSessions = [], currentSessionId = null;
 let sessionQuery = '', sessionLoading = true, lastPrompt = '';
 let currentCwd = '';
+let attachments = [];
 
 // ─── Theme ───
 function setTheme(theme) {
@@ -1464,13 +1498,90 @@ function trimMessages(){
 messagesEl.addEventListener('scroll',()=>{const{scrollTop,scrollHeight,clientHeight}=messagesEl;autoScroll=scrollHeight-scrollTop-clientHeight<60});
 function scrollToBottom(){trimMessages();if(autoScroll)requestAnimationFrame(()=>{messagesEl.scrollTop=messagesEl.scrollHeight})}
 
+// ─── 附件上传 ───
+function fmtSize(n){
+  n=Number(n)||0;
+  if(n<1024)return n+'B';
+  if(n<1024*1024)return (n/1024).toFixed(1)+'KB';
+  return (n/1024/1024).toFixed(1)+'MB';
+}
+function pickFile(){ if(streaming)return; fileInput.click(); }
+async function uploadFile(file){
+  if(file.size>20*1024*1024){ addError('文件超过 20MB：'+file.name); return; }
+  const fd=new FormData();
+  fd.append('file',file,file.name);
+  try{
+    const res=await fetch('/upload',{method:'POST',body:fd});
+    if(!res.ok){
+      const err=await res.json().catch(()=>({}));
+      addError('上传失败：'+(err.error||('HTTP '+res.status)));
+      return;
+    }
+    const data=await res.json();
+    attachments.push(data);
+    renderAttachments();
+  }catch(e){
+    addError('上传失败：'+e.message);
+  }
+}
+function renderAttachments(){
+  if(!attachmentBar)return;
+  if(!attachments.length){
+    attachmentBar.classList.remove('show');
+    attachmentBar.innerHTML='';
+    return;
+  }
+  attachmentBar.classList.add('show');
+  attachmentBar.innerHTML=attachments.map((a,i)=>
+    '<span class="attachment-chip" title="'+escapeHtml(a.path)+'">'
+    +'<span class="att-name">'+escapeHtml(a.name)+'</span>'
+    +'<span class="att-size">'+fmtSize(a.size)+'</span>'
+    +'<button class="att-remove" aria-label="移除附件" onclick="removeAttachment('+i+')">×</button>'
+    +'</span>').join('');
+}
+function removeAttachment(i){ attachments.splice(i,1); renderAttachments(); }
+
+fileInput.addEventListener('change',async ()=>{
+  const files=[...fileInput.files];
+  fileInput.value='';
+  for(const f of files){ await uploadFile(f); }
+});
+
+// 拖拽上传：拖到对话区松开即可
+let dragDepth=0;
+centerEl.addEventListener('dragenter',e=>{
+  if(!e.dataTransfer||!e.dataTransfer.types.includes('Files'))return;
+  e.preventDefault();dragDepth++;centerEl.classList.add('drag-over');
+});
+centerEl.addEventListener('dragover',e=>{
+  if(e.dataTransfer&&e.dataTransfer.types.includes('Files'))e.preventDefault();
+});
+centerEl.addEventListener('dragleave',()=>{
+  dragDepth=Math.max(0,dragDepth-1);
+  if(dragDepth===0)centerEl.classList.remove('drag-over');
+});
+centerEl.addEventListener('drop',e=>{
+  if(!e.dataTransfer||!e.dataTransfer.files.length)return;
+  e.preventDefault();
+  dragDepth=0;centerEl.classList.remove('drag-over');
+  [...e.dataTransfer.files].forEach(uploadFile);
+});
+
 // ─── Input ───
 function runCommand(text){
-  if(!text||streaming)return;
+  if(streaming)return;
+  const files=attachments.slice();
+  if(!text&&!files.length)return;
+  let payload=text;
+  // 附件只跟随普通消息；斜杠命令不携带附件
+  if(files.length&&!text.startsWith('/')){
+    payload='（附件：'+files.map(a=>a.path).join(', ')+'）\n'+text;
+    attachments=[];renderAttachments();
+  }
   // 只记住普通消息，斜杠命令不参与「重试上一条」
-  if(!text.startsWith('/'))lastPrompt=text;
-  addUser(text);
-  ws.send(JSON.stringify({type:'user_message',data:{content:text}}));
+  if(!payload.startsWith('/'))lastPrompt=payload;
+  addUser(payload);
+  ws.send(JSON.stringify({type:'user_message',data:{content:payload}}));
   inputEl.value='';inputEl.style.height='auto';streaming=true;updateUI();
 }
 function sendMessage(){if(slashMenu.classList.contains('show'))hideSlashMenu();runCommand(inputEl.value.trim())}

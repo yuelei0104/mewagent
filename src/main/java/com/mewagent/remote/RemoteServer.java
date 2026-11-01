@@ -162,11 +162,16 @@ public class RemoteServer {
         // 解析监听地址（格式 ":18888" 或 "0.0.0.0:18888"）
         int port = parsePort(addr);
 
-        Javalin app = Javalin.create()
+        Javalin app = Javalin.create(config -> {
+                    // 上传接口需要比默认更大的请求体（默认 1MB 不够放代码/日志）
+                    config.http.maxRequestSize = 20_000_000L;
+                })
                 .get("/", ctx -> {
                     ctx.contentType("text/html; charset=utf-8");
                     ctx.result(WebContent.INDEX_HTML);
                 })
+                // ── 文件上传：落盘到 workDir/.mewagent/uploads/<session>/ ──
+                .post("/upload", this::handleUpload)
                 // ── REST 任务接口（供 CI / 告警系统调用）──────────────────
                 .post("/task", this::handleCreateTask)
                 .get("/task/{id}", this::handleGetTask)
@@ -436,6 +441,64 @@ public class RemoteServer {
         SessionManager.saveTitle(workDir, targetId, title);
         broadcastSessions(workDir);
         return true;
+    }
+
+    /**
+     * 接收浏览器上传的文件，落到 {@code <workDir>/.mewagent/uploads/<session>/<name>}。
+     *
+     * <p>刻意落在工作区内：Agent 的 ReadFile / EditFile 对工作区路径默认放行，
+     * 上传完就能直接读改，不需要额外授权。改的是副本，用户的原文件不动。
+     */
+    private void handleUpload(Context ctx) {
+        try {
+            var files = ctx.uploadedFiles("file");
+            if (files == null || files.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "没有收到文件"));
+                return;
+            }
+            var file = files.get(0);
+            String name = sanitizeFileName(file.filename());
+            if (name.isEmpty()) {
+                ctx.status(400).json(Map.of("error", "文件名不合法"));
+                return;
+            }
+            String workDir = System.getProperty("user.dir");
+            Path dir = Path.of(workDir, ".mewagent", "uploads", sessionId).normalize();
+            Files.createDirectories(dir);
+            Path target = dir.resolve(name).normalize();
+            if (!target.startsWith(dir)) {
+                ctx.status(400).json(Map.of("error", "非法路径"));
+                return;
+            }
+            try (var in = file.content(); var out = Files.newOutputStream(target)) {
+                in.transferTo(out);
+            }
+            String relative = Path.of(workDir).relativize(target).toString().replace('\\', '/');
+            ctx.json(Map.of(
+                    "name", target.getFileName().toString(),
+                    "path", relative,
+                    "size", Files.size(target)
+            ));
+        } catch (Exception e) {
+            ctx.status(500).json(Map.of("error", "上传失败: " + e.getMessage()));
+        }
+    }
+
+    /** 只保留文件名本身：剥掉目录、控制字符和 Windows 保留字符。 */
+    private static String sanitizeFileName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String base = raw.replace('\\', '/');
+        int slash = base.lastIndexOf('/');
+        if (slash >= 0) {
+            base = base.substring(slash + 1);
+        }
+        base = base.replaceAll("[\\x00-\\x1F<>:\"|?*]", "").strip();
+        if (base.equals(".") || base.equals("..")) {
+            return "";
+        }
+        return base.length() > 120 ? base.substring(0, 120) : base;
     }
 
     /** 广播会话列表快照（list/new/delete 三处复用）。 */
