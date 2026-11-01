@@ -223,6 +223,13 @@ public class CommandRegistry {
                 null
         );
 
+        // /rename <title> (LOCAL_UI)：重命名当前会话
+        register(
+                new Command("rename", "Rename the current session: /rename <title>",
+                        new String[]{}, CommandType.LOCAL_UI, false),
+                null
+        );
+
         // /status (LOCAL, alias: s)
         register(
                 new Command("status", "Show current status",

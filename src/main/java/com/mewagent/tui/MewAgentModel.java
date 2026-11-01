@@ -1163,6 +1163,18 @@ public class MewAgentModel implements Model {
                         yield UpdateResult.from(this,
                                 Command.println("\033[2J\033[3J\033[H" + renderBanner() + "\n"));
                     }
+                    case "rename" -> {
+                        String newTitle = args == null ? "" : args.strip();
+                        if (newTitle.isEmpty()) {
+                            chatMessages.add(new ChatMessage("system",
+                                    "用法：/rename <新标题>"));
+                        } else {
+                            com.mewagent.session.SessionManager.saveTitle(
+                                    System.getProperty("user.dir"), sessionId, newTitle);
+                            chatMessages.add(new ChatMessage("system",
+                                    "会话已重命名为：" + newTitle));
+                        }
+                    }
                     case "compact" -> {
                         if (agent != null) {
                             try {

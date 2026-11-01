@@ -418,16 +418,16 @@ public class RemoteServer {
      * 长度 1..60。重命名过的会话不会再被自动标题覆盖，因为
      * {@link #maybeGenerateTitle()} 发现已有 title 就直接跳过。
      */
-    private void handleRenameSession(String targetId, String newTitle) {
+    private boolean handleRenameSession(String targetId, String newTitle) {
         if (targetId == null || targetId.isBlank() || newTitle == null) {
-            return;
+            return false;
         }
         if (!targetId.matches("[A-Za-z0-9._-]+") || targetId.contains("..")) {
-            return;
+            return false;
         }
         String title = newTitle.strip();
         if (title.isEmpty()) {
-            return;
+            return false;
         }
         if (title.length() > 60) {
             title = title.substring(0, 60);
@@ -435,6 +435,7 @@ public class RemoteServer {
         String workDir = System.getProperty("user.dir");
         SessionManager.saveTitle(workDir, targetId, title);
         broadcastSessions(workDir);
+        return true;
     }
 
     /** 广播会话列表快照（list/new/delete 三处复用）。 */
@@ -886,6 +887,15 @@ public class RemoteServer {
                         case "retitle" -> {
                             handleRetitle();
                             return; // retitle 自己管 command_done
+                        }
+                        case "rename" -> {
+                            boolean renamed = handleRenameSession(sessionId, args);
+                            broadcast(Map.of("type", "system", "data", Map.of("message",
+                                    renamed
+                                            ? "会话已重命名为：" + args.strip()
+                                            : "用法：/rename <新标题>")));
+                            broadcast(Map.of("type", "command_done"));
+                            return;
                         }
                     }
                     broadcast(Map.of("type", "command_done"));
