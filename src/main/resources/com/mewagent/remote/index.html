@@ -424,7 +424,14 @@ button{font-family:inherit}
 .msg-assistant .bubble tr:last-child td{border-bottom:none}
 .msg-assistant .bubble th{background:var(--surface);color:var(--text-bright);font-weight:500}
 
-.msg-system{text-align:center;color:var(--text-dim);font-size:12px;margin:16px 0}
+.msg-system{text-align:center;color:var(--text-dim);font-size:12px;margin:16px 0;white-space:pre-wrap}
+/* 多行系统消息（/help、/status 等）用左对齐卡片，避免长文本居中挤成一团 */
+.msg-system.multi{
+  text-align:left;font-family:var(--font-mono);font-size:12px;line-height:1.75;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:12px 16px;color:var(--text);
+  overflow-x:auto;
+}
 .msg-error{
   display:block;color:var(--red);font-size:12.5px;
   margin:12px 0;padding:10px 14px;border-radius:10px;
@@ -1341,7 +1348,13 @@ function showWelcome(){
 function clearWelcome(){const w=messagesEl.querySelector('.welcome');if(w)w.remove()}
 function useTip(i){inputEl.value=WELCOME_TIPS[i];inputEl.focus()}
 
-function addSystem(t){clearWelcome();const d=document.createElement('div');d.className='msg msg-system';d.textContent=t;messagesEl.appendChild(d);scrollToBottom()}
+function addSystem(t){
+  clearWelcome();
+  const d=document.createElement('div');
+  d.className='msg msg-system'+(t.includes('\n')?' multi':'');
+  d.textContent=t;
+  messagesEl.appendChild(d);scrollToBottom();
+}
 function addError(t){
   clearWelcome();
   const d=document.createElement('div');
