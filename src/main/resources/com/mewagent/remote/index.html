@@ -197,7 +197,8 @@ button{font-family:inherit}
 .session-item.active .session-title{color:var(--text-bright)}
 
 .session-del{
-  flex-shrink:0;width:18px;height:18px;
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:18px;height:18px;
   display:flex;align-items:center;justify-content:center;
   border:none;border-radius:5px;
   background:transparent;color:var(--text-dim);
@@ -208,6 +209,27 @@ button{font-family:inherit}
 .session-item:hover .session-del{opacity:1}
 .session-del:hover{color:var(--red);background:rgba(255,107,122,.14)}
 .session-del.armed{color:#fff;background:var(--red);opacity:1;font-size:11px}
+
+.session-rename{
+  position:absolute;right:27px;top:50%;transform:translateY(-50%);
+  width:18px;height:18px;
+  display:flex;align-items:center;justify-content:center;
+  border:none;border-radius:5px;
+  background:transparent;color:var(--text-dim);
+  font-size:11px;line-height:1;padding:0;cursor:pointer;
+  opacity:0;
+  transition:opacity .12s ease,color .12s ease,background .12s ease;
+}
+.session-item:hover .session-rename{opacity:1}
+.session-rename:hover{color:var(--accent);background:var(--accent-soft)}
+/* 只有悬停时才给右侧按钮让位，平时标题可以用满宽度 */
+.session-main{transition:padding-right .12s ease}
+.session-item:hover .session-main{padding-right:44px}
+.session-title-input{
+  width:100%;height:22px;padding:0 6px;border-radius:5px;
+  border:1px solid var(--accent-line);background:var(--surface-2);
+  color:var(--text-bright);font-family:inherit;font-size:12.5px;outline:none;
+}
 
 .session-empty{
   padding:28px 14px;text-align:center;
@@ -1152,6 +1174,8 @@ function renderSessions(){
         +'<div class="session-title">'+escapeHtml(title)+'</div>'
         +'<div class="session-meta">'+escapeHtml(meta)+'</div>'
       +'</div>'
+      +'<button class="session-rename" title="重命名会话" aria-label="重命名会话"'
+        +' onclick="event.stopPropagation();startInlineRename(\''+s.id+'\',this)">✎</button>'
       +'<button class="session-del" title="删除会话" aria-label="删除会话" onclick="event.stopPropagation();askDelete(\''+s.id+'\',this)">×</button>'
       +'</div>';
   });
@@ -1180,6 +1204,42 @@ function viewSession(id){
   if(ws&&ws.readyState===WebSocket.OPEN){
     ws.send(JSON.stringify({type:'get_session_history',data:{id}}));
   }
+}
+
+// 侧栏内联重命名：点铅笔把标题换成输入框，Enter 保存，Esc / 失焦取消
+function startInlineRename(id,btn){
+  const item=btn.closest('.session-item');
+  if(!item||item.querySelector('.session-title-input'))return;
+  const titleEl=item.querySelector('.session-title');
+  if(!titleEl)return;
+  const current=allSessions.find(s=>s.id===id)||{};
+  const original=current.title||'';
+  const input=document.createElement('input');
+  input.className='session-title-input';
+  input.value=original;
+  input.placeholder=sessionTitle(current);
+  input.maxLength=60;
+  input.setAttribute('aria-label','重命名会话');
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let finished=false;
+  const finish=(save)=>{
+    if(finished)return;
+    finished=true;
+    const title=input.value.trim();
+    if(save&&title&&title!==original&&ws&&ws.readyState===WebSocket.OPEN){
+      ws.send(JSON.stringify({type:'rename_session',data:{id,title}}));
+    }
+    renderSessions();
+  };
+  input.addEventListener('keydown',e=>{
+    e.stopPropagation();
+    if(e.key==='Enter'){e.preventDefault();finish(true);}
+    else if(e.key==='Escape'){e.preventDefault();finish(false);}
+  });
+  input.addEventListener('blur',()=>finish(false));
+  ['click','dblclick'].forEach(t=>input.addEventListener(t,e=>e.stopPropagation()));
 }
 
 function closeHistory(){
