@@ -60,10 +60,18 @@ MewAgent Java 适合这些场景：
 - **计划模式** — 提案 → 审查 diff → 批准/拒绝后再应用更改。
 - **打印模式** — 非交互模式，使用 `-p` 参数单次提示并输出到 stdout。
 - **远程服务器** — 通过 `--remote` 启动 HTTP + WebSocket 服务，附带内置 Web UI
-  与 REST 任务接口（`POST /task`），可供浏览器、编辑器插件和 CI 调用。
+  （会话搜索与时间分组、设置面板、失败重试、实时 token 用量）与 REST 任务接口
+  （`POST /task`）。设置 `MEWAGENT_TASK_TOKEN` 后，WebSocket 与 REST 都要求令牌。
 - **容器化运行** — 多阶段 Docker 镜像，以非 root 用户运行；Linux 环境下
   bubblewrap 沙箱开箱可用，不受 Windows 宿主降级路径的影响。
-- **会话管理** — 磁盘 JSONL 会话记录、带 diff 恢复的文件历史追踪。
+- **会话管理** — 磁盘 JSONL 会话记录、带 diff 恢复的文件历史追踪。删除会话会
+  一并清理它的上传目录；启动时清理 30 天前的过期会话与孤儿上传目录。
+- **会话标题** — 首轮对话后异步生成标题；可在侧栏直接改名、在设置面板修改，
+  或用 `/rename <标题>`（`/retitle` 可批量回填历史会话）。标题以 `type=title`
+  记录写进会话 JSONL，读取时会跳过，不影响回放与消息计数。
+- **文件上传** — Web UI 支持选择或拖拽文件，保存到
+  `.mewagent/uploads/<session>/`；文件位于工作区内，Agent 用现有的
+  ReadFile / EditFile 直接读取和修改（改的是副本，原文件不动）。
 - **LLM 提供商** — Anthropic Messages API、OpenAI Chat Completions，以及
   OpenAI 兼容提供商（DeepSeek 等），通过 `openai-compat` 协议接入。
 
@@ -72,6 +80,11 @@ MewAgent Java 适合这些场景：
 - **Agent 循环：** 用户输入 → LLM 调用 → 工具执行 → 结果反馈 → 下一轮 LLM
   调用 → 重复直到输出纯文本响应。每个工具调用恰好经过 LLM 一次往返。
   `maxIterations` 可配置，防止失控循环。
+
+- **统一装配：** Print 与 Remote 两个入口已经共用 `AgentSessionFactory`：
+  注册表、内置工具、文件历史、权限、Hook、技能、MCP 只写一遍，入口只负责接
+  自己的 UI 适配器。此前三份重复的装配导致过能力漂移（远程模式漏了记忆注入），
+  这个工厂修掉了它，新增工具也从"改三处"降到"改两处"。TUI 的迁移尚未完成。
 
 - **延迟加载工具和技能：** 工具通过 `ShouldDefer()` 注册为"延迟"模式——上下文
   中只出现工具名称，模型通过 ToolSearch 按需获取完整 Schema。技能同理：
@@ -254,7 +267,15 @@ java -jar build/libs/mewagent.jar --remote=:18888
 
 # 运行测试
 ./gradlew test
+
+# 测试 + 覆盖率报告（build/reports/jacoco/test/html/index.html）
+./gradlew jacocoTestReport
 ```
+
+测试覆盖了上下文压缩、工具结果预算、权限判定、Hook 引擎、会话读写、工具注册表，
+以及用脚本化假客户端驱动的 Agent 主循环（文本响应、工具调用、未知工具、迭代上限、
+流错误、输出截断）。当前行覆盖率约 15%，`tui`、`remote`、`teams` 等需要终端或
+HTTP 夹具的模块尚未覆盖。
 
 ## 重要操作说明
 
