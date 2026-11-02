@@ -127,7 +127,10 @@ public class OpenAiCompatClient implements LlmClient {
         var toolIds = new HashMap<Integer, String>();
         // 累积 reasoning_content（DeepSeek/小米等 provider）
         var reasoningAccum = new StringBuilder();
-        boolean streamEnded = false;
+        // usage 与 stopReason 留到流结束再发：OpenAI 兼容 provider 会把 usage 放在
+        // finish_reason 之后的独立 chunk 里，提前发 StreamEnd 会让上层读不到 token 统计。
+        var state = new StreamState();
+        boolean completed = false;
 
         try (var reader = new BufferedReader(
                 new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
@@ -140,17 +143,28 @@ public class OpenAiCompatClient implements LlmClient {
                 String data = line.substring(6).trim();
 
                 if ("[DONE]".equals(data)) {
-                    // Flush any in-flight tool calls then emit StreamEnd if not already done
-                    flushPendingToolCalls(queue, toolNames, toolArgs, toolIds);
-                    if (!streamEnded) {
-                        queue.put(new StreamEvent.StreamEnd("end_turn", 0, 0));
-                    }
                     break;
                 }
 
-                streamEnded = handleSseData(data, queue, toolNames, toolArgs, toolIds, reasoningAccum);
+                handleSseData(data, queue, toolNames, toolArgs, toolIds, reasoningAccum, state);
+            }
+            completed = true;
+        } finally {
+            // 正常结束才补 StreamEnd；异常路径交给调用方发 Error，避免两个终止事件打架
+            if (completed) {
+                flushPendingToolCalls(queue, toolNames, toolArgs, toolIds);
+                queue.put(new StreamEvent.StreamEnd(
+                        state.stopReason, state.input, state.output, state.cacheRead, 0));
             }
         }
+    }
+
+    /** 流式过程中累积的结束状态：stopReason 与 usage。 */
+    private static final class StreamState {
+        String stopReason = "end_turn";
+        int input;
+        int output;
+        int cacheRead;
     }
 
     // ------------------------------------------------------------------
@@ -158,20 +172,28 @@ public class OpenAiCompatClient implements LlmClient {
     // ------------------------------------------------------------------
 
     /**
-     * Process a single SSE data payload.
-     *
-     * @return true if a StreamEnd event was emitted (i.e. finish_reason seen)
+     * 处理单个 SSE data 片段：把文本、推理、工具调用增量推进队列，
+     * 并更新 {@link StreamState} 里的 usage 与 stopReason。终止事件由调用方统一发出。
      */
-    private boolean handleSseData(String data, BlockingQueue<StreamEvent> queue,
-                                   Map<Integer, StringBuilder> toolNames,
-                                   Map<Integer, StringBuilder> toolArgs,
-                                   Map<Integer, String> toolIds,
-                                   StringBuilder reasoningAccum) throws InterruptedException {
+    private void handleSseData(String data, BlockingQueue<StreamEvent> queue,
+                               Map<Integer, StringBuilder> toolNames,
+                               Map<Integer, StringBuilder> toolArgs,
+                               Map<Integer, String> toolIds,
+                               StringBuilder reasoningAccum,
+                               StreamState state) throws InterruptedException {
         JsonNode root;
         try {
             root = MAPPER.readTree(data);
         } catch (JsonProcessingException e) {
-            return false; // skip unparsable chunks
+            return; // skip unparsable chunks
+        }
+
+        // usage 可能出现在任意 chunk（含 choices 为空的独立 usage chunk）
+        if (root.has("usage") && !root.get("usage").isNull()) {
+            int[] usage = extractUsage(root);
+            state.input = usage[0];
+            state.output = usage[1];
+            state.cacheRead = usage[2];
         }
 
         // ---- error object ----
@@ -179,13 +201,12 @@ public class OpenAiCompatClient implements LlmClient {
             var errNode = root.get("error");
             String errMsg = errNode.has("message") ? errNode.get("message").asText() : errNode.toString();
             queue.put(new StreamEvent.Error(errMsg));
-            return false;
+            return;
         }
 
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
-            // Might be a usage-only chunk (stream_options.include_usage)
-            return emitUsageIfPresent(root, queue);
+            return; // usage-only chunk
         }
 
         JsonNode choice = choices.get(0);
@@ -246,16 +267,14 @@ public class OpenAiCompatClient implements LlmClient {
         }
 
         if ("tool_calls".equals(finishReason)) {
+            // 工具调用先冲刷出去，StreamEnd 留到流结束统一发
             flushPendingToolCalls(queue, toolNames, toolArgs, toolIds);
-            return false;
-        } else if ("stop".equals(finishReason) || "length".equals(finishReason)) {
-            String stopReason = "length".equals(finishReason) ? "max_tokens" : "end_turn";
-            int[] usage = extractUsage(root);
-            queue.put(new StreamEvent.StreamEnd(stopReason, usage[0], usage[1], usage[2], 0));
-            return true;
+            state.stopReason = "end_turn";
+        } else if ("length".equals(finishReason)) {
+            state.stopReason = "max_tokens";
+        } else if ("stop".equals(finishReason)) {
+            state.stopReason = "end_turn";
         }
-
-        return false;
     }
 
     // ------------------------------------------------------------------
@@ -295,15 +314,6 @@ public class OpenAiCompatClient implements LlmClient {
     // ------------------------------------------------------------------
     // Usage extraction
     // ------------------------------------------------------------------
-
-    private boolean emitUsageIfPresent(JsonNode root, BlockingQueue<StreamEvent> queue) throws InterruptedException {
-        int[] usage = extractUsage(root);
-        if (usage[0] > 0 || usage[1] > 0) {
-            queue.put(new StreamEvent.StreamEnd("end_turn", usage[0], usage[1], usage[2], 0));
-            return true;
-        }
-        return false;
-    }
 
     /**
      * Returns {input, output, cacheRead}. OpenAI-compatible providers have no
