@@ -9,6 +9,7 @@ import com.mewagent.conversation.ToolUseBlock;
 import com.mewagent.hook.HookEngine;
 import com.mewagent.llm.LlmClient;
 import com.mewagent.llm.StreamEvent;
+import com.mewagent.llm.StreamEventQueue;
 import com.mewagent.permission.PermissionChecker;
 import com.mewagent.permission.PermissionMode;
 import com.mewagent.plan.PlanFile;
@@ -151,7 +152,12 @@ public class Agent {
 
     // 使用调用方提供的 queue，允许 TUI 预先创建 queue 立即开始轮询
     public void run(ConversationManager conv, BlockingQueue<AgentEvent> queue) {
-        Thread.startVirtualThread(() -> {
+        start(conv, queue);
+    }
+
+    /** Return the execution thread so Remote can cancel the actual Agent, not just its UI reader. */
+    public Thread start(ConversationManager conv, BlockingQueue<AgentEvent> queue) {
+        return Thread.startVirtualThread(() -> {
             try {
                 agentLoop(conv, queue);
             } catch (Exception e) {
@@ -169,6 +175,7 @@ public class Agent {
 
         int contextRetries = 0;
         boolean loopCompleted = false;
+        BlockingQueue<StreamEvent> activeStream = null;
 
         try {
         for (int iteration = 1; ; iteration++) {
@@ -256,6 +263,7 @@ public class Agent {
 
             var tools = iterToolSchemas;
             var streamQueue = client.stream(conv, tools);
+            activeStream = streamQueue;
 
             // Consume stream events, collect tool calls
             var text = new StringBuilder();
@@ -315,6 +323,9 @@ public class Agent {
 
                 if (event instanceof StreamEvent.StreamEnd || event instanceof StreamEvent.Error) break;
             }
+
+            if (activeStream instanceof StreamEventQueue cancellable) cancellable.cancel();
+            activeStream = null;
 
             // Error recovery
             if (streamError) {
@@ -459,8 +470,13 @@ public class Agent {
             putSafe(queue, new AgentEvent.TurnComplete(iteration));
         }
         } finally {
-            if (!loopCompleted) {
-                putSafe(queue, new AgentEvent.LoopComplete(0));
+            if (activeStream instanceof StreamEventQueue cancellable) cancellable.cancel();
+            // Interrupted queue.put would drop the terminal event and leave Remote stuck stopping.
+            boolean interrupted = Thread.interrupted();
+            try {
+                if (!loopCompleted) putSafe(queue, new AgentEvent.LoopComplete(0));
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
             }
         }
     }

@@ -28,3 +28,6 @@ docker/gradle-dists/*
 
 # Gradle wrapper 必须入库，否则 CI / 全新克隆无法执行 ./gradlew
 !gradle/wrapper/gradle-wrapper.jar
+
+# Frontend regression test dependencies
+node_modules

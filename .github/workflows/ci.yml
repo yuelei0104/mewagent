@@ -32,6 +32,16 @@ jobs:
       - name: Run tests
         run: ./gradlew test --no-daemon --console=plain
 
+      - name: Set up Node for UI regression tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run UI regression tests
+        run: |
+          npm ci --prefix tools/ui --ignore-scripts --no-audit --no-fund
+          npm test --prefix tools/ui
+
       - name: Build shadow jar
         run: ./gradlew shadowJar --no-daemon --console=plain
 
@@ -41,3 +51,24 @@ jobs:
           name: mewagent-jar
           path: build/libs/mewagent.jar
           if-no-files-found: error
+
+  ui-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install UI test dependencies and Chromium
+        run: |
+          npm ci --prefix tools/ui --ignore-scripts --no-audit --no-fund
+          tools/ui/node_modules/.bin/playwright install --with-deps chromium
+      - name: Check UI interactions and responsive layouts
+        run: node tools/ui/browser-smoke.mjs
+      - name: Upload UI review screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-ui-screenshots
+          path: build/ui-review/*.png
+          if-no-files-found: warn
