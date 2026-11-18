@@ -15,7 +15,7 @@
     :root {
       --ui-scale: 1;
       --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
-      --sans: "Segoe UI Variable Text", "Segoe UI", Inter, -apple-system, "PingFang SC", "Microsoft YaHei UI", sans-serif;
+      --sans: "Segoe UI Variable Text", "Segoe UI", Inter, -apple-system, "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
 
       /* 暗色：偏蓝的近黑，非纯黑，避免 OLED 上的脏灰 */
       --bg: #0b0e13;
@@ -1653,6 +1653,7 @@
     #connection-notice[hidden] { display: none; }
     #send-btn.is-stop { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
     #send-btn:disabled { cursor: wait; }
+    #send-btn { margin-left: auto; }
     #editor-status { min-height: 30px; height: auto; flex-wrap: wrap; gap: 6px; padding-top: 4px; padding-bottom: 4px; }
     .es-left, .es-right { flex-wrap: wrap; gap: 10px; }
     #es-model { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }

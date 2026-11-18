@@ -63,6 +63,7 @@ try {
     });
     assert.ok(bounds.sendLeft >= 0 && bounds.sendRight <= width + 1, JSON.stringify(bounds));
     assert.ok(bounds.centerRight <= width + 1, JSON.stringify(bounds));
+    assert.ok(width - bounds.sendRight < 60, 'Send/Stop stays aligned to the composer right edge');
     await page.screenshot({ path: output + `conversation-${width}.png` });
   }
   await page.setViewportSize({ width: 390, height: 844 });
