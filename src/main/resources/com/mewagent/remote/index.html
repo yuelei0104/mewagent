@@ -1332,12 +1332,17 @@
     .es-item.accent { color: var(--accent); opacity: .9; }
     .es-item.dim { opacity: .65; }
 
-    .usage-meter { display: inline-flex; align-items: center; gap: 4px; }
-    .usage-item { display: inline-flex; align-items: center; gap: 3px; }
-    .usage-k { opacity: .7; }
-    .usage-v { color: var(--text); }
+    .usage-meter {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .usage-item { display: inline-flex; align-items: baseline; gap: 4px; }
+    .usage-k { font-size: 10px; letter-spacing: .04em; color: var(--dim); }
+    .usage-v { color: var(--text); font-family: var(--mono); font-size: 11px; }
 
-    .usage-sep { width: 1px; height: 9px; background: var(--border-strong); margin: 0 3px; }
+    .usage-sep { width: 1px; height: 9px; background: var(--border-strong); margin: 0 8px; }
 
     /* ═══ 斜杠菜单 ═══ */
     #slash-menu {
@@ -1758,9 +1763,9 @@
       </div>
       <div class="es-right">
         <span id="usage-meter" class="usage-meter" title="本次会话累计 token 用量">
-          <span class="usage-item"><span class="usage-k">↑</span><span class="usage-v" id="usage-in">0</span></span>
+          <span class="usage-item"><span class="usage-k">输入</span><span class="usage-v" id="usage-in">0</span></span>
           <span class="usage-sep"></span>
-          <span class="usage-item"><span class="usage-k">↓</span><span class="usage-v" id="usage-out">0</span></span>
+          <span class="usage-item"><span class="usage-k">输出</span><span class="usage-v" id="usage-out">0</span></span>
         </span>
         <span id="conn-status" class="conn-status"><span class="dot disconnected"></span>未连接</span>
       </div>
@@ -1831,19 +1836,37 @@ function fmtTokens(n){
   if(n>=1000)return (n/1000).toFixed(n>=10000?0:1)+'k';
   return String(n);
 }
-function updateUsage(inTok,outTok){
-  const a=document.getElementById('usage-in'),b=document.getElementById('usage-out');
-  const m=document.getElementById('usage-meter');
-  if(a)a.textContent=fmtTokens(inTok);
-  if(b)b.textContent=fmtTokens(outTok);
-  if(m)m.style.display='inline-flex';
+
+// 累计用量 + 本轮增量：状态栏显示本会话累计，每轮结束显示这一轮的实际消耗
+let usageTotals = { in: 0, out: 0 };
+let turnIn = 0, turnOut = 0;
+function fmtExact(n) { return Number(n || 0).toLocaleString('en-US'); }
+function updateUsage(inTok, outTok) {
+  const totalIn = inTok || 0, totalOut = outTok || 0;
+  const dIn = Math.max(0, totalIn - usageTotals.in);
+  const dOut = Math.max(0, totalOut - usageTotals.out);
+  usageTotals = { in: totalIn, out: totalOut };
+  turnIn += dIn; turnOut += dOut;
+  const a = document.getElementById('usage-in'), b = document.getElementById('usage-out');
+  const m = document.getElementById('usage-meter');
+  if (a) a.textContent = fmtExact(totalIn);
+  if (b) b.textContent = fmtExact(totalOut);
+  if (m) {
+    m.title = '本会话累计 输入 ' + fmtExact(totalIn) + ' tokens · 输出 ' + fmtExact(totalOut) + ' tokens';
+    m.style.display = 'inline-flex';
+  }
 }
-function resetUsage(){
-  const m=document.getElementById('usage-meter');
-  const a=document.getElementById('usage-in'),b=document.getElementById('usage-out');
-  if(a)a.textContent='0';
-  if(b)b.textContent='0';
-  if(m)m.style.display='inline-flex';
+function usageSummary() {
+  if (!turnIn && !turnOut) return '';
+  return ' · 本轮 输入 ' + fmtExact(turnIn) + ' / 输出 ' + fmtExact(turnOut);
+}
+function resetUsage() {
+  usageTotals = { in: 0, out: 0 }; turnIn = 0; turnOut = 0;
+  const m = document.getElementById('usage-meter');
+  const a = document.getElementById('usage-in'), b = document.getElementById('usage-out');
+  if (a) a.textContent = '0';
+  if (b) b.textContent = '0';
+  if (m) { m.title = '本会话累计 token 用量'; m.style.display = 'inline-flex'; }
 }
 // 后端 formatRelativeTime 返回英文，这里只做展示层转换，不改服务端
 function relTime(s){
@@ -1970,8 +1993,8 @@ function handleMessage(msg){
     case 'loop_complete':
       if(currentAssistantEl){updateAssistant(currentAssistantEl,currentStreamText,false);currentAssistantEl=null;currentStreamText=''}
       currentThinkingEl=null;currentThinkingText='';
-      const el=document.createElement('div');el.className='done-indicator';el.textContent='✻ 完成 · '+msg.data.elapsed.toFixed(1)+'s';
-      messagesEl.appendChild(el);streaming=false;updateUI();scrollToBottom();
+      const el=document.createElement('div');el.className='done-indicator';el.textContent='✻ 完成 · '+msg.data.elapsed.toFixed(1)+'s'+usageSummary();
+      turnIn=0;turnOut=0;messagesEl.appendChild(el);streaming=false;updateUI();scrollToBottom();
       if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'list_sessions',data:{}}));
       break;
     case 'usage': updateUsage(msg.data.inputTokens,msg.data.outputTokens); break;
@@ -2580,7 +2603,7 @@ function renderSettings(){
     ['会话', currentSessionId||'—'],
     ['工作目录', currentCwd||'—'],
     ['主题', theme==='light'?'浅色':'深色'],
-    ['累计 token', document.getElementById('usage-in').textContent+' / '+document.getElementById('usage-out').textContent]
+    ['累计 token', '输入 '+document.getElementById('usage-in').textContent+' · 输出 '+document.getElementById('usage-out').textContent]
   ];
   let html='';
   html+='<div class="settings-row"><span class="settings-label">会话名称</span>'
