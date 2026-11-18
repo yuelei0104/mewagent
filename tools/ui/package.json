@@ -1,0 +1,12 @@
+{
+  "name": "mewagent-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test remote-ui.test.mjs"
+  },
+  "devDependencies": {
+    "happy-dom": "21.0.4",
+    "playwright": "1.62.1"
+  }
+}

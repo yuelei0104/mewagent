@@ -63,9 +63,16 @@ public class StreamingExecutor {
                     var futures = batch.calls.stream()
                             .map(call -> executor.submit(() -> executeSingle(call)))
                             .toList();
-                    for (var future : futures) {
-                        try { results.add(future.get()); }
-                        catch (Exception ignored) {}
+                    for (int i = 0; i < futures.size(); i++) {
+                        var call = batch.calls.get(i);
+                        try { results.add(futures.get(i).get()); }
+                        catch (InterruptedException e) {
+                            futures.forEach(f -> f.cancel(true));
+                            Thread.currentThread().interrupt();
+                            results.add(new ToolExecResult(call.toolId(), "Tool execution cancelled", true));
+                        } catch (Exception e) {
+                            results.add(new ToolExecResult(call.toolId(), "Tool execution failed: " + e.getMessage(), true));
+                        }
                     }
                 }
             } else {
@@ -94,6 +101,9 @@ public class StreamingExecutor {
     }
 
     private ToolExecResult executeSingle(ToolCallInfo call) {
+        if (Thread.currentThread().isInterrupted()) {
+            return new ToolExecResult(call.toolId(), "Tool execution cancelled", true);
+        }
         Tool tool = registry.get(call.toolName());
         if (tool == null) {
             putSafe(new AgentEvent.ToolResultEvent(call.toolId(), call.toolName(), "Unknown tool", true, 0));
@@ -116,6 +126,9 @@ public class StreamingExecutor {
                     PermissionResponse response;
                     try {
                         response = future.get(5, TimeUnit.MINUTES);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        response = PermissionResponse.DENY;
                     } catch (Exception e) {
                         response = PermissionResponse.DENY;
                     }
@@ -145,6 +158,9 @@ public class StreamingExecutor {
             }
         }
 
+        if (Thread.currentThread().isInterrupted()) {
+            return new ToolExecResult(call.toolId(), "Tool execution cancelled", true);
+        }
         long start = System.nanoTime();
         ToolResult result;
         try {

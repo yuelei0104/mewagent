@@ -54,14 +54,15 @@ public class OpenAiClient implements LlmClient {
 
     @Override
     public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<Map<String, Object>> tools) {
-        var queue = new LinkedBlockingQueue<StreamEvent>(64);
+        var queue = new StreamEventQueue();
 
-        Thread.startVirtualThread(() -> {
+        queue.start(() -> {
             try {
                 doStream(conv, tools, queue);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
+                if (queue.isCancelled()) return;
                 try { queue.put(new StreamEvent.Error(classifyError(e).getMessage())); }
                 catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
             }
@@ -71,7 +72,7 @@ public class OpenAiClient implements LlmClient {
     }
 
     private void doStream(ConversationManager conv, List<Map<String, Object>> tools,
-                          BlockingQueue<StreamEvent> queue) throws Exception {
+                          StreamEventQueue queue) throws Exception {
 
         var paramsBuilder = ResponseCreateParams.builder()
                 .model(model)
@@ -99,6 +100,7 @@ public class OpenAiClient implements LlmClient {
 
         try (StreamResponse<ResponseStreamEvent> streamResponse =
                      sdkClient.responses().createStreaming(paramsBuilder.build())) {
+            queue.attach(streamResponse);
 
             var iterator = streamResponse.stream().iterator();
             while (iterator.hasNext()) {

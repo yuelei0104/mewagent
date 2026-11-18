@@ -167,6 +167,7 @@ public class BashTool implements Tool {
             timeout = MAX_TIMEOUT;
         }
 
+        Process process = null;
         try {
             // 如果沙箱可用，将命令包装在沙箱中执行
             String actualCommand = command;
@@ -183,20 +184,24 @@ public class BashTool implements Tool {
                 pb.directory(new java.io.File(workDir));
             }
 
-            Process process = pb.start();
-
-            // 合并流后只需读取 getInputStream()
-            String output;
-            try (InputStream stream = process.getInputStream()) {
-                output = new String(stream.readAllBytes());
-            }
+            process = pb.start();
+            final Process running = process;
+            // Read concurrently: readAllBytes before waitFor makes timeout/cancel ineffective.
+            var outputFuture = new java.util.concurrent.CompletableFuture<String>();
+            Thread.startVirtualThread(() -> {
+                try (InputStream stream = running.getInputStream()) {
+                    outputFuture.complete(new String(stream.readAllBytes()));
+                } catch (IOException e) {
+                    outputFuture.completeExceptionally(e);
+                }
+            });
 
             boolean finished = process.waitFor(timeout, TimeUnit.SECONDS);
             if (!finished) {
-                process.destroyForcibly();
                 return ToolResult.error("Error: command timed out after " + timeout + "s");
             }
 
+            String output = outputFuture.get(5, TimeUnit.SECONDS);
             int exitCode = process.exitValue();
 
             var sb = new StringBuilder();
@@ -226,6 +231,13 @@ public class BashTool implements Tool {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return ToolResult.error("Error: command interrupted");
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            return ToolResult.error("Error reading command output: " + e.getMessage());
+        } finally {
+            if (process != null) {
+                process.descendants().forEach(child -> { if (child.isAlive()) child.destroyForcibly(); });
+                if (process.isAlive()) process.destroyForcibly();
+            }
         }
     }
 

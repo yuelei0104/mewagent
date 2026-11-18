@@ -81,6 +81,8 @@ public class RemoteServer {
     // ── 流式状态 ──────────────────────────────────────────────────────
     private volatile boolean streaming;
     private volatile Thread streamThread;
+    private volatile Thread agentThread;
+    private volatile boolean cancelRequested;
     private BlockingQueue<AgentEvent> agentQueue;
 
     // ── 权限和 ask_user 的待决响应 ────────────────────────────────────
@@ -195,10 +197,7 @@ public class RemoteServer {
                         // 新连接推送 session 信息
                         broadcast(Map.of(
                                 "type", "connected",
-                                "data", Map.of(
-                                        "session", sessionId,
-                                        "cwd", System.getProperty("user.dir")
-                                )
+                                "data", connectedData()
                         ));
                         // 推送命令列表
                         broadcast(Map.of(
@@ -349,9 +348,7 @@ public class RemoteServer {
                     }
                 }
                 case "cancel" -> {
-                    // 中断当前流式响应
-                    Thread t = streamThread;
-                    if (t != null) t.interrupt();
+                    cancelActiveRun();
                 }
                 case "ping" -> {
                     // 应用层保活：回复 pong
@@ -372,6 +369,7 @@ public class RemoteServer {
                     }
                 }
                 case "new_session" -> {
+                    if (streaming) break;
                     String wd = System.getProperty("user.dir");
                     // 新 session ID
                     sessionId = SessionManager.newId();
@@ -383,7 +381,7 @@ public class RemoteServer {
                     // 通知所有连接
                     broadcast(Map.of("type", "clear"));
                     broadcast(Map.of("type", "connected", "data",
-                            Map.of("session", sessionId, "cwd", wd)));
+                            connectedData()));
                     // 刷新会话列表
                     broadcastSessions(wd);
                 }
@@ -413,7 +411,7 @@ public class RemoteServer {
                                 fileHistory = new FileHistory(wd, sessionId);
                                 broadcast(Map.of("type", "clear"));
                                 broadcast(Map.of("type", "connected", "data",
-                                        Map.of("session", sessionId, "cwd", wd)));
+                                        connectedData()));
                             }
                             broadcast(Map.of("type", "session_deleted", "data", Map.of("id", targetId)));
                         } else {
@@ -650,6 +648,70 @@ public class RemoteServer {
         return last;
     }
 
+    private Map<String, Object> runtimeData() {
+        return Map.of(
+                "branch", WorkspaceInfo.branch(Path.of(System.getProperty("user.dir"))),
+                "model", providers.isEmpty() ? "" : Objects.toString(providers.getFirst().getModel(), ""),
+                "permissionMode", permChecker == null ? "default" : permChecker.getMode().name().toLowerCase(Locale.ROOT),
+                "streaming", streaming,
+                "stopping", cancelRequested && streaming);
+    }
+
+    private Map<String, Object> connectedData() {
+        var data = new HashMap<String, Object>(runtimeData());
+        data.put("session", sessionId);
+        data.put("cwd", System.getProperty("user.dir"));
+        return data;
+    }
+
+    private void broadcastRuntimeState() {
+        broadcast(Map.of("type", "runtime_state", "data", runtimeData()));
+    }
+
+    private synchronized void startAgentRun() {
+        agentQueue = new LinkedBlockingQueue<>(64);
+        agentThread = agent.start(conversation, agentQueue);
+        if (cancelRequested) agentThread.interrupt();
+        broadcastRuntimeState();
+    }
+
+    private synchronized void cancelActiveRun() {
+        if (!streaming) return;
+        cancelRequested = true;
+        Thread execution = agentThread;
+        if (execution != null) execution.interrupt();
+        else if (streamThread != null) streamThread.interrupt();
+        pendingPerms.values().forEach(f -> f.complete(PermissionResponse.DENY));
+        pendingAsks.values().forEach(f -> f.complete(Map.of()));
+        broadcast(Map.of("type", "run_stopping"));
+    }
+
+    private void finishAgentRun() {
+        Thread execution = agentThread;
+        if (execution != null && execution.isAlive()) {
+            execution.interrupt();
+            // Keep the single-Agent lock until cancellation has actually finished.
+            boolean interrupted = Thread.interrupted();
+            try {
+                while (execution.isAlive()) {
+                    execution.join(100);
+                    // A timed-out/disconnected reader must not leave a producer blocked on a full queue.
+                    if (agentQueue != null) agentQueue.clear();
+                }
+            } catch (InterruptedException e) { interrupted = true; }
+            finally { if (interrupted) Thread.currentThread().interrupt(); }
+        }
+        pendingPerms.values().forEach(f -> f.complete(PermissionResponse.DENY));
+        pendingPerms.clear();
+        pendingAsks.values().forEach(f -> f.complete(Map.of()));
+        pendingAsks.clear();
+        streaming = false;
+        streamThread = null;
+        agentThread = null;
+        agentQueue = null;
+        broadcastRuntimeState();
+    }
+
     // ────────────────────────────────────────────────────────────────────
     // 用户消息处理
     // ────────────────────────────────────────────────────────────────────
@@ -662,7 +724,9 @@ public class RemoteServer {
 
         // 斜杠命令处理
         if (content.startsWith("/")) {
-            handleSlashCommand(content);
+            synchronized (agentLock) {
+                if (!streaming) handleSlashCommand(content);
+            }
             return;
         }
 
@@ -671,6 +735,7 @@ public class RemoteServer {
             if (streaming) return;
 
             streaming = true;
+            cancelRequested = false;
             streamThread = Thread.currentThread();
             String workDir = System.getProperty("user.dir");
             pendingUserPrompt = content;
@@ -684,15 +749,13 @@ public class RemoteServer {
             }
 
             // 启动 Agent 并消费事件
-            agentQueue = agent.run(conversation);
+            startAgentRun();
             if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
             try {
                 consumeAgentEvents();
             } finally {
-                streaming = false;
-                streamThread = null;
-                agentQueue = null;
+                finishAgentRun();
             }
         }
     }
@@ -807,6 +870,7 @@ public class RemoteServer {
             }
 
             streaming = true;
+            cancelRequested = false;
             task.status = RemoteTask.RUNNING;
             task.startedAt = System.currentTimeMillis();
             var text = new StringBuilder();
@@ -821,7 +885,7 @@ public class RemoteServer {
                     mcpInstructions = "";
                 }
 
-                agentQueue = agent.run(conversation);
+                startAgentRun();
                 if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
                 outer:
@@ -860,6 +924,7 @@ public class RemoteServer {
             } catch (Exception e) {
                 task.error = "task error: " + e.getMessage();
             } finally {
+                if (cancelRequested && task.error == null) task.error = "cancelled";
                 if (task.error == null) {
                     task.status = RemoteTask.COMPLETED;
                     if (task.result != null && !task.result.isEmpty()) {
@@ -874,9 +939,7 @@ public class RemoteServer {
                     task.status = RemoteTask.FAILED;
                 }
                 task.finishedAt = System.currentTimeMillis();
-                streaming = false;
-                streamThread = null;
-                agentQueue = null;
+                finishAgentRun();
             }
         }
     }
@@ -998,6 +1061,7 @@ public class RemoteServer {
 
                     // PROMPT 命令生成 prompt 注入给 Agent
                     streaming = true;
+                    cancelRequested = false;
                     streamThread = Thread.currentThread();
                     String workDir = System.getProperty("user.dir");
                     SessionManager.saveMessage(workDir, sessionId, "user", displayText);
@@ -1008,21 +1072,20 @@ public class RemoteServer {
                         mcpInstructions = "";
                     }
 
-                    agentQueue = agent.run(conversation);
+                    startAgentRun();
                     if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
                     try {
                         consumeAgentEvents();
                     } finally {
-                        streaming = false;
-                        streamThread = null;
-                        agentQueue = null;
+                        finishAgentRun();
                     }
                 }
             }
         } catch (Exception e) {
             broadcast(Map.of("type", "error", "data",
                     Map.of("message", "Command error: " + e.getMessage())));
+            broadcast(Map.of("type", "command_done"));
         }
     }
 
@@ -1086,6 +1149,7 @@ public class RemoteServer {
         }
         String workDir = System.getProperty("user.dir");
         permChecker.setMode(PermissionMode.PLAN);
+        broadcastRuntimeState();
         String planPath = PlanFile.getOrCreatePlanPath(workDir);
         broadcast(Map.of("type", "system", "data",
                 Map.of("message", "Entered Plan mode. Plan file: " + planPath
@@ -1094,19 +1158,18 @@ public class RemoteServer {
         // 带参数直接发给 Agent
         if (args != null && !args.isEmpty()) {
             streaming = true;
+            cancelRequested = false;
             streamThread = Thread.currentThread();
             SessionManager.saveMessage(workDir, sessionId, "user", "/plan " + args);
             conversation.addUserMessage(args);
 
-            agentQueue = agent.run(conversation);
+            startAgentRun();
             if (askUserTool != null) askUserTool.setEventQueue(agentQueue);
 
             try {
                 consumeAgentEvents();
             } finally {
-                streaming = false;
-                streamThread = null;
-                agentQueue = null;
+                finishAgentRun();
             }
         }
     }
@@ -1216,8 +1279,11 @@ public class RemoteServer {
             }
 
             if (event == null) {
-                broadcast(Map.of("type", "error", "data", Map.of("message", "Stream timeout")));
-                break;
+                if (!cancelRequested) {
+                    cancelActiveRun();
+                    broadcast(Map.of("type", "error", "data", Map.of("message", "Stream timeout")));
+                }
+                continue; // Keep consuming until the Agent acknowledges cancellation.
             }
 
             switch (event) {
@@ -1301,9 +1367,10 @@ public class RemoteServer {
                     double elapsed = (System.currentTimeMillis() - startTime) / 1000.0;
                     broadcast(Map.of("type", "loop_complete", "data", Map.of(
                             "totalTurns", e.totalTurns(),
-                            "elapsed", elapsed
+                            "elapsed", elapsed,
+                            "cancelled", cancelRequested
                     )));
-                    maybeGenerateTitle();
+                    if (!cancelRequested) maybeGenerateTitle();
                     return; // Agent 循环结束
                 }
                 case AgentEvent.UsageEvent e -> {

@@ -76,14 +76,15 @@ public class OpenAiCompatClient implements LlmClient {
 
     @Override
     public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<Map<String, Object>> tools) {
-        var queue = new LinkedBlockingQueue<StreamEvent>(64);
+        var queue = new StreamEventQueue();
 
-        Thread.startVirtualThread(() -> {
+        queue.start(() -> {
             try {
                 doStream(conv, tools, queue);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
+                if (queue.isCancelled()) return;
                 try {
                     queue.put(new StreamEvent.Error(classifyError(e).getMessage()));
                 } catch (InterruptedException ie) {
@@ -96,7 +97,7 @@ public class OpenAiCompatClient implements LlmClient {
     }
 
     private void doStream(ConversationManager conv, List<Map<String, Object>> tools,
-                           BlockingQueue<StreamEvent> queue) throws Exception {
+                           StreamEventQueue queue) throws Exception {
 
         String body = buildRequestBody(conv.getMessages(), tools);
 
@@ -112,6 +113,7 @@ public class OpenAiCompatClient implements LlmClient {
         HttpResponse<java.io.InputStream> response = httpClient.send(
                 request, HttpResponse.BodyHandlers.ofInputStream());
 
+        queue.attach(response.body());
         int statusCode = response.statusCode();
         if (statusCode != 200) {
             String errBody;
